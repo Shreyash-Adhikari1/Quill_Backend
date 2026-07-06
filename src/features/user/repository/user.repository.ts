@@ -4,6 +4,7 @@ import { IUser, UserModel } from "../model/user.model";
 export interface UserRepositoryInterface {
   getAllUsers(skip?: number, limit?: number): Promise<IUser[]>;
   getUserById(userId: string): Promise<IUser | null>;
+  getPublicUserById(userId: string): Promise<IUser | null>;
   getUserByUsername(username: string): Promise<IUser | null>;
   getUserWithPassword(userId: string): Promise<IUser | null>;
   getUserWithSecrets(userId: string): Promise<IUser | null>;
@@ -44,6 +45,11 @@ export class UserRepository implements UserRepositoryInterface {
   async getUserById(userId: string) {
     return UserModel.findById(userId).exec();
     // return UserModel.findById(userId).populate("posts").exec();
+  }
+
+  async getPublicUserById(userId: string) {
+    // Public/social profile reads exclude admins so privileged accounts do not appear as normal community users.
+    return UserModel.findOne({ _id: userId, role: { $ne: "admin" } }).exec();
   }
 
   async getUserByUsername(username: string) {

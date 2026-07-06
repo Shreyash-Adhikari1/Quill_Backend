@@ -45,6 +45,8 @@ userRouter.post("/me/import", authMiddleware, userController.importMyData);
 userRouter.delete("/me", authMiddleware, userController.deleteUser);
 
 // get routes
+userRouter.get("/users", authMiddleware, userController.getAllusers);
+
 userRouter.get("/:userId", authMiddleware, userController.getUserProfile);
 
 userRouter.post(

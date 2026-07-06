@@ -206,7 +206,7 @@ export class UserController {
           .json({ success: false, message: "User not found" });
       }
 
-      const user = await userService.getUserById(userId as string);
+      const user = await userService.getPublicUserById(userId as string);
 
       return res.status(200).json({
         success: true,
