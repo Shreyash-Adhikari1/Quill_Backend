@@ -1,0 +1,40 @@
+# Keep host dependencies out of the build context.
+# The container installs Linux-compatible dependencies with npm ci.
+node_modules
+
+# Ignore compiled output because the Docker builder compiles a fresh dist/.
+dist
+
+# Never bake environment files into an image.
+# Secrets are provided at runtime through docker-compose variables.
+.env
+.env.*
+!.env.example
+
+# TLS private keys stay on the host and are mounted read-only at runtime.
+# Shipping keys inside an image would expose them to anyone with image access.
+certs/
+
+# Logs and uploads are runtime data, not immutable image contents.
+logs/
+uploads/
+*.log
+
+# Git metadata and editor noise are not needed to run the app.
+.git
+.gitignore
+.vscode
+.idea
+
+# Test files are not needed in the production image.
+src/__tests__/
+
+# Local documentation is excluded to reduce build context size.
+README.md
+*.md
+
+# Keep TypeScript config in the context because npm run build needs tsconfig.json.
+# Other optional development-only tool configs can be excluded safely.
+.eslintrc*
+.prettierrc*
+nodemon.json

@@ -353,6 +353,12 @@ export class UserService {
     return this.sanitizeUser(user);
   }
 
+  async getPublicUserById(userId: string) {
+    const user = await userRepository.getPublicUserById(userId);
+    if (!user) throw new Error("User not found");
+    return this.sanitizeUser(user);
+  }
+
   async getUserByUsername(username: string) {
     const user = await userRepository.getUserByUsername(username);
     if (!user) throw new Error("User not found");
