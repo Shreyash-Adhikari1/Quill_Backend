@@ -26,6 +26,11 @@ export class FollowService {
     if (!userToFollow) {
       throw new HttpError(404, "User to follow not found");
     }
+    const publicUserToFollow = await userRepository.getPublicUserById(userToFollow);
+    if (!publicUserToFollow) {
+      // Admin accounts are deliberately hidden from social follow relationships.
+      throw new HttpError(404, "User to follow not found");
+    }
     if (followerId == userToFollow) {
       throw new HttpError(400, "You cannot follow or unfollow yourself");
     }
@@ -49,6 +54,11 @@ export class FollowService {
   ): Promise<IFollow | null> {
     const userToUnfollow = new Types.ObjectId(followingId).toString();
     if (!userToUnfollow) {
+      throw new HttpError(404, "User to unfollow not found");
+    }
+    const publicUserToUnfollow = await userRepository.getPublicUserById(userToUnfollow);
+    if (!publicUserToUnfollow) {
+      // Admin accounts are not exposed as normal follow targets.
       throw new HttpError(404, "User to unfollow not found");
     }
     const isAlreadyFollowed = await followRepository.isFollowing(
@@ -84,10 +94,12 @@ export class FollowService {
 
     // If no viewer (public endpoint), just return false
     if (!viewerId) {
-      return rows.map((r: any) => ({
-        ...(r.toObject?.() ?? r),
-        isFollowedByMe: false,
-      }));
+      return rows
+        .filter((r: any) => r.follower)
+        .map((r: any) => ({
+          ...(r.toObject?.() ?? r),
+          isFollowedByMe: false,
+        }));
     }
 
     // Get all ids that viewer follows ONCE
@@ -95,7 +107,7 @@ export class FollowService {
       await followRepository.getFollowingIdsOnly(viewerId);
     const set = new Set(viewerFollowingIds.map(String));
 
-    return rows.map((r: any) => {
+    return rows.filter((r: any) => r.follower).map((r: any) => {
       const obj = r.toObject?.() ?? r;
       const followerUserId = String(obj.follower?._id ?? obj.follower);
       return {
@@ -112,17 +124,19 @@ export class FollowService {
     const rows = await followRepository.getFollowing(userId);
 
     if (!viewerId) {
-      return rows.map((r: any) => ({
-        ...(r.toObject?.() ?? r),
-        isFollowedByMe: false,
-      }));
+      return rows
+        .filter((r: any) => r.following)
+        .map((r: any) => ({
+          ...(r.toObject?.() ?? r),
+          isFollowedByMe: false,
+        }));
     }
 
     const viewerFollowingIds =
       await followRepository.getFollowingIdsOnly(viewerId);
     const set = new Set(viewerFollowingIds.map(String));
 
-    return rows.map((r: any) => {
+    return rows.filter((r: any) => r.following).map((r: any) => {
       const obj = r.toObject?.() ?? r;
       const followingUserId = String(obj.following?._id ?? obj.following); // following is populated
       return {

@@ -21,8 +21,8 @@ export class FollowRepository implements FollowRepositoryInterface {
     await newFollow.save(); // saves to DB
 
     return FollowModel.findById(newFollow._id)
-      .populate("follower", "_id username avatar")
-      .populate("following", "_id username avatar")
+      .populate({ path: "follower", select: "_id username avatar", match: { role: { $ne: "admin" } } })
+      .populate({ path: "following", select: "_id username avatar", match: { role: { $ne: "admin" } } })
       .exec() as Promise<IFollow>;
   }
 
@@ -36,8 +36,8 @@ export class FollowRepository implements FollowRepositoryInterface {
       follower: followerId,
       following: followingId,
     })
-      .populate("follower", "_id username avatar")
-      .populate("following", "_id username avatar")
+      .populate({ path: "follower", select: "_id username avatar", match: { role: { $ne: "admin" } } })
+      .populate({ path: "following", select: "_id username avatar", match: { role: { $ne: "admin" } } })
       .exec();
 
     if (!deletedFollow) {
@@ -50,24 +50,25 @@ export class FollowRepository implements FollowRepositoryInterface {
   // Get all users who follow this user
   async getFollowers(userId: string): Promise<IFollow[]> {
     return FollowModel.find({ following: userId, isFollowActive: true })
-      .populate("follower", "_id username avatar")
+      .populate({ path: "follower", select: "_id username avatar", match: { role: { $ne: "admin" } } })
       .exec();
   }
 
   // Get all users that this user is following
   async getFollowing(userId: string): Promise<IFollow[]> {
     return FollowModel.find({ follower: userId, isFollowActive: true })
-      .populate("following", "_id username avatar")
+      .populate({ path: "following", select: "_id username avatar", match: { role: { $ne: "admin" } } })
       .exec();
   }
   // This method has been added purely to filter posts by following
   async getFollowingIdsOnly(userId: string): Promise<string[]> {
     const rows = await FollowModel.find({ follower: userId })
       .select("following")
+      .populate({ path: "following", select: "_id", match: { role: { $ne: "admin" } } })
       .lean()
       .exec();
 
-    return rows.map((r: any) => String(r.following));
+    return rows.filter((r: any) => r.following).map((r: any) => String(r.following._id ?? r.following));
   }
 
   // Check if followerId is following followingId

@@ -20,6 +20,15 @@ export interface PostRepositoryInterface {
 }
 
 export class PostRepository implements PostRepositoryInterface {
+  private async nonAdminAuthorIds(authorIds?: string[]) {
+    // Public feeds must not expose admin accounts as ordinary authors.
+    const filter: Record<string, unknown> = authorIds?.length
+      ? { _id: { $in: authorIds }, role: { $ne: "admin" } }
+      : { role: { $ne: "admin" } };
+    const users = await UserModel.find(filter).select("_id").lean().exec();
+    return users.map((user) => user._id);
+  }
+
   async getAllPosts(skip = 0, limit = 10): Promise<IPost[]> {
     return PostModel.find({ isDeleted: false })
       .skip(skip)
@@ -29,9 +38,11 @@ export class PostRepository implements PostRepositoryInterface {
   }
 
   async getPublicFeed(skip = 0, limit = 10): Promise<IPost[]> {
+    const nonAdminAuthorIds = await this.nonAdminAuthorIds();
     return PostModel.find({
       isDeleted: false,
       visibility: "public",
+      author: { $in: nonAdminAuthorIds },
     })
       .sort({ likeCount: -1, createdAt: -1 })
       .skip(skip)
@@ -41,8 +52,12 @@ export class PostRepository implements PostRepositoryInterface {
   }
 
   async getFollowingFeed(authorIds: string[], skip = 0, limit = 10) {
+    const nonAdminAuthorIds = await this.nonAdminAuthorIds(authorIds);
+    if (nonAdminAuthorIds.length === 0) return [];
+
     return PostModel.find({
-      author: { $in: authorIds },
+      author: { $in: nonAdminAuthorIds },
+      isDeleted: false,
     })
       .sort({ likeCount: -1, createdAt: -1 })
       .skip(skip)
@@ -58,6 +73,9 @@ export class PostRepository implements PostRepositoryInterface {
   }
 
   async getPostsByUser(userId: string, skip = 0, limit = 10): Promise<IPost[]> {
+    const [nonAdminAuthorId] = await this.nonAdminAuthorIds([userId]);
+    if (!nonAdminAuthorId) return [];
+
     return PostModel.find({ author: userId, isDeleted: false })
       .sort({ createdAt: -1 })
       .populate("author", "username fullName avatarUrl")
