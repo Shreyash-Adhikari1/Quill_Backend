@@ -8,9 +8,9 @@ A secure note-sharing and social platform built with Express, Next.js, and Mongo
 
 | Repository                                                       | Description                              |
 | ---------------------------------------------------------------- | ---------------------------------------- |
-| [Quill_Security](https://github.com/yourusername/Quill_Security) | Root repo — Docker setup, compose config |
-| [Quill_Backend](https://github.com/yourusername/Quill_Backend)   | Express + TypeScript + Mongoose API      |
-| [Quill_Frontend](https://github.com/yourusername/Quill_Frontend) | Next.js + TypeScript + Tailwind frontend |
+| [Quill_Security](https://github.com/Shreyash-Adhikari1/Quill_App) | Root repo — Docker setup, compose config |
+| [Quill_Backend](https://github.com/Shreyash-Adhikari1/Quill_Backend)   | Express + TypeScript + Mongoose API      |
+| [Quill_Frontend](https://github.com/Shreyash-Adhikari1/Quill_Frontend) | Next.js + TypeScript + Tailwind frontend |
 
 ---
 
@@ -47,15 +47,15 @@ sudo chmod +x /usr/local/bin/mkcert
 ### Step 1 — Clone the root repository
 
 ```bash
-git clone https://github.com/yourusername/Quill_Security
+git clone https://github.com/Shreyash-Adhikari1/Quill_Security
 cd Quill_Security
 ```
 
 ### Step 2 — Clone backend and frontend inside the root
 
 ```bash
-git clone https://github.com/yourusername/Quill_Backend
-git clone https://github.com/yourusername/Quill_Frontend
+git clone https://github.com/Shreyash-Adhikari1/Quill_Backend
+git clone https://github.com/Shreyash-Adhikari1/Quill_Frontend
 ```
 
 ### 2 — Configure environment variables
