@@ -8,6 +8,8 @@
     "test": "jest --runInBand",
     "test:unit": "jest --runInBand",
     "build": "tsc",
+    "seed:admin": "ts-node src/scripts/seed-admin.ts",
+    "seed:admin:prod": "node dist/scripts/seed-admin.js",
     "start": "node dist/index.js"
   },
   "keywords": [],

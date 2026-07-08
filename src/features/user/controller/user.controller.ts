@@ -8,7 +8,7 @@ import {
   VerifyEmailDTO,
 } from "../dto/user.dto";
 import { UserService } from "../service/user.service";
-import { createCaptchaChallenge, verifyCaptchaChallenge } from "../service/captcha.service";
+import { verifyRecaptchaToken } from "../service/captcha.service";
 
 const userService = new UserService();
 
@@ -27,8 +27,8 @@ function setAuthCookie(res: Response, token: string) {
 
 export class UserController {
   getCaptcha = async (_req: Request, res: Response) => {
-    // CAPTCHA is issued server-side so automated clients cannot simply submit auth forms without solving a fresh challenge.
-    return res.status(200).json({ success: true, ...createCaptchaChallenge() });
+    // The old math CAPTCHA endpoint is retained for route compatibility; auth now uses Google reCAPTCHA tokens instead.
+    return res.status(410).json({ success: false, message: "Use reCAPTCHA verification on auth forms." });
   };
 
   registerUser = async (req: Request, res: Response) => {
@@ -44,9 +44,9 @@ export class UserController {
           });
       }
 
-      const { captchaId, captchaAnswer, ...data } = registerDetailsParsed.data;
-      if (!verifyCaptchaChallenge(captchaId, captchaAnswer)) {
-        return res.status(400).json({ success: false, message: "Invalid CAPTCHA challenge" });
+      const { recaptchaToken, ...data } = registerDetailsParsed.data;
+      if (!(await verifyRecaptchaToken(recaptchaToken, req.ip, "REGISTER"))) {
+        return res.status(400).json({ success: false, message: "Complete the reCAPTCHA challenge" });
       }
 
       const user = await userService.createUser(data, requestContext(req));
@@ -74,9 +74,9 @@ export class UserController {
           .json({ success: false, message: "Invalid Credentials" });
       }
 
-      const { email, password, captchaId, captchaAnswer } = loginDetailsParsed.data;
-      if (!verifyCaptchaChallenge(captchaId, captchaAnswer)) {
-        return res.status(400).json({ success: false, message: "Invalid CAPTCHA challenge" });
+      const { email, password, recaptchaToken } = loginDetailsParsed.data;
+      if (!(await verifyRecaptchaToken(recaptchaToken, req.ip, "LOGIN"))) {
+        return res.status(400).json({ success: false, message: "Complete the reCAPTCHA challenge" });
       }
 
       const loginResult = await userService.loginUser(email, password, requestContext(req));

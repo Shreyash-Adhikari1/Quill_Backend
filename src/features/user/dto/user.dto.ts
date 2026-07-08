@@ -19,8 +19,8 @@ export const RegisterUserDTO = UserSchema.pick({
 }).extend({
   // Backend password complexity is authoritative; frontend strength feedback is only a UX helper.
   password: PasswordPolicySchema,
-  captchaId: z.string().optional(),
-  captchaAnswer: z.string().optional(),
+  // reCAPTCHA is verified server-side so clients cannot bypass bot checks by hiding the widget.
+  recaptchaToken: z.string().min(1, "Complete the reCAPTCHA challenge"),
 }); // Backend requires only the real password; confirmPassword is a frontend-only UX check if used.
 export type RegisterUserDTO = z.infer<typeof RegisterUserDTO>;
 
@@ -28,8 +28,8 @@ export const LoginUserDTO = UserSchema.pick({
   email: true,
   password: true,
 }).extend({
-  captchaId: z.string().optional(),
-  captchaAnswer: z.string().optional(),
+  // Login requires a fresh Google token to slow credential-stuffing automation before password checks run.
+  recaptchaToken: z.string().min(1, "Complete the reCAPTCHA challenge"),
 });
 export type LoginUserDTO = z.infer<typeof LoginUserDTO>;
 

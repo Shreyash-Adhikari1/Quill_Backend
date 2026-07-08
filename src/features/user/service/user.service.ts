@@ -119,7 +119,7 @@ export class UserService {
     });
   }
 
-  async createUser(data: RegisterUserDTO, context?: { ip?: string; userAgent?: string }) {
+  async createUser(data: Omit<RegisterUserDTO, "recaptchaToken">, context?: { ip?: string; userAgent?: string }) {
     const existingUser = await userRepository.findByEmailOrUsername(
       data.email.toLowerCase(),
       data.username,
