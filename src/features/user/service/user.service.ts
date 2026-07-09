@@ -199,7 +199,7 @@ export class UserService {
         sessionVersion: user.sessionVersion || 0,
       },
       jwtSecret(),
-      { expiresIn: "10d" },
+      { expiresIn: "15d" },
     );
   }
 
