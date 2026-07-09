@@ -9,7 +9,7 @@ import {
   UserRepositoryInterface,
 } from "../repository/user.repository";
 import { IUser } from "../model/user.model";
-import { ChangePasswordDTO, EditUserDTO, RegisterUserDTO } from "../dto/user.dto";
+import { ChangePasswordDTO, EditUserDTO, PasswordPolicySchema, RegisterUserDTO } from "../dto/user.dto";
 import { HttpError } from "../../../errors/http-error";
 import { sendEmail } from "../../../config/email";
 import logger from "../../../utils/logger";
@@ -126,7 +126,7 @@ export class UserService {
     );
 
     if (existingUser) {
-      throw new Error("User with this email or username already exists");
+      throw new HttpError(409, "User with this email or username already exists");
     }
 
     // Passwords are bcrypt-hashed before storage so a database leak does not expose plaintext credentials.
@@ -150,7 +150,7 @@ export class UserService {
     const user = await userRepository.getUserByEmailWithSecrets(email);
 
     if (!user) {
-      throw new Error("Invalid credentials");
+      throw new HttpError(401, "Invalid credentials");
     }
 
     if (user.lockUntil && user.lockUntil.getTime() > Date.now()) {
@@ -163,7 +163,7 @@ export class UserService {
     if (!isPasswordValid) {
       await this.recordFailedLogin(user);
       await auditActivity({ userId: user._id.toString(), action: "user.login_failed", ...context });
-      throw new Error("Invalid credentials");
+      throw new HttpError(401, "Invalid credentials");
     }
 
     if (!user.isVerified) {
@@ -232,7 +232,7 @@ export class UserService {
 
   async setupMfa(userId: string) {
     const user = await userRepository.getUserById(userId);
-    if (!user) throw new Error("User not found");
+    if (!user) throw new HttpError(404, "User not found");
 
     const secret = speakeasy.generateSecret({
       name: `Quill (${user.email})`,
@@ -306,7 +306,7 @@ export class UserService {
 
   async updateUser(userId: string, data: EditUserDTO, context?: { ip?: string; userAgent?: string }) {
     const user = await userRepository.getUserById(userId);
-    if (!user) throw new Error("User not found");
+    if (!user) throw new HttpError(404, "User not found");
 
     // Mass assignment protection: profile edits may not set role, password, verification, or MFA fields.
     const { role, ...safeData } = data;
@@ -318,12 +318,12 @@ export class UserService {
       );
 
       if (existingUser && existingUser._id.toString() !== userId) {
-        throw new Error("Email or username already in use");
+        throw new HttpError(409, "Email or username already in use");
       }
     }
 
     const updatedUser = await userRepository.updateUser(userId, safeData);
-    if (!updatedUser) throw new Error("Failed to update user");
+    if (!updatedUser) throw new HttpError(500, "Failed to update user");
 
     await auditActivity({ userId, action: "user.profile_updated", ...context });
     return this.sanitizeUser(updatedUser);
@@ -331,7 +331,7 @@ export class UserService {
 
   async changePassword(userId: string, data: ChangePasswordDTO, context?: { ip?: string; userAgent?: string }) {
     const user = await userRepository.getUserWithSecrets(userId);
-    if (!user) throw new Error("User not found");
+    if (!user) throw new HttpError(404, "User not found");
 
     const valid = await bcrypt.compare(data.currentPassword, user.password);
     if (!valid) throw new HttpError(401, "Current password is incorrect");
@@ -349,25 +349,25 @@ export class UserService {
 
   async getUserById(userId: string) {
     const user = await userRepository.getUserById(userId);
-    if (!user) throw new Error("User not found");
+    if (!user) throw new HttpError(404, "User not found");
     return this.sanitizeUser(user);
   }
 
   async getPublicUserById(userId: string) {
     const user = await userRepository.getPublicUserById(userId);
-    if (!user) throw new Error("User not found");
+    if (!user) throw new HttpError(404, "User not found");
     return this.sanitizeUser(user);
   }
 
   async getUserByUsername(username: string) {
     const user = await userRepository.getUserByUsername(username);
-    if (!user) throw new Error("User not found");
+    if (!user) throw new HttpError(404, "User not found");
     return this.sanitizeUser(user);
   }
 
   async deleteUser(userId: string, context?: { ip?: string; userAgent?: string }) {
     const user = await userRepository.getUserById(userId);
-    if (!user) throw new Error("User not found");
+    if (!user) throw new HttpError(404, "User not found");
 
     await userRepository.deleteUser(userId);
     await auditActivity({ userId, action: "user.deleted", ...context });
@@ -409,6 +409,11 @@ export class UserService {
       throw new HttpError(400, "Email, OTP, and new password are required");
     }
 
+    const passwordCheck = PasswordPolicySchema.safeParse(newPassword);
+    if (!passwordCheck.success) {
+      throw new HttpError(400, passwordCheck.error.issues[0]?.message || "Password does not meet policy");
+    }
+
     const user = await userRepository.getUserByEmailWithSecrets(email.toLowerCase());
     if (!user) throw new HttpError(400, "Invalid or expired OTP");
 
@@ -420,7 +425,7 @@ export class UserService {
 
   async exportMyData(userId: string, context?: { ip?: string; userAgent?: string }) {
     const user = await userRepository.getUserById(userId);
-    if (!user) throw new Error("User not found");
+    if (!user) throw new HttpError(404, "User not found");
 
     await auditActivity({ userId, action: "user.data_exported", ...context });
     // Privacy export intentionally excludes password hashes, OTP secrets, and one-time codes.
@@ -436,7 +441,7 @@ export class UserService {
       bio: data.bio,
       avatarUrl: data.avatarUrl,
     });
-    if (!updated) throw new Error("User not found");
+    if (!updated) throw new HttpError(404, "User not found");
 
     await auditActivity({ userId, action: "user.data_imported", ...context });
     return this.sanitizeUser(updated);

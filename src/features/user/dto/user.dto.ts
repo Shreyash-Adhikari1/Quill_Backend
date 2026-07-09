@@ -49,6 +49,14 @@ export const ChangePasswordDTO = z.object({
 });
 export type ChangePasswordDTO = z.infer<typeof ChangePasswordDTO>;
 
+export const ResetPasswordDTO = z.object({
+  email: z.string().email(),
+  otp: z.string().regex(/^\d{6}$/, "OTP must be 6 digits"),
+  // Password reset is a backend-enforced credential change, so it must use the same policy as registration/change-password.
+  newPassword: PasswordPolicySchema,
+});
+export type ResetPasswordDTO = z.infer<typeof ResetPasswordDTO>;
+
 export const OtpDTO = z.object({
   otp: z.string().regex(/^\d{6}$/, "OTP must be 6 digits"),
 });
