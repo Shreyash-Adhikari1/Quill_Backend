@@ -2,6 +2,7 @@ import { IPost } from "../../posts/model/post.model";
 import { IUser } from "../../user/model/user.model";
 import { UserRepository } from "../../user/repository/user.repository";
 import { AdminRepository } from "../repository/admin.repository";
+import { HttpError } from "../../../errors/http-error";
 
 const adminRepository = new AdminRepository();
 const userRepository = new UserRepository();
@@ -22,13 +23,13 @@ export class AdminService {
 
   async getUserById(userId: string) {
     const user = await adminRepository.getUserById(userId);
-    if (!user) throw new Error("User not found");
+    if (!user) throw new HttpError(404, "User not found");
     return this.sanitizeUser(user);
   }
 
   async getUserByUsername(username: string) {
     const user = await adminRepository.getUserByUsername(username);
-    if (!user) throw new Error("User not found");
+    if (!user) throw new HttpError(404, "User not found");
     return this.sanitizeUser(user);
   }
 
@@ -36,7 +37,7 @@ export class AdminService {
 
   async deleteUser(userId: string) {
     const user = await adminRepository.getUserById(userId);
-    if (!user) throw new Error("User not found");
+    if (!user) throw new HttpError(404, "User not found");
 
     await adminRepository.deleteUser(userId);
     return { message: "User deleted successfully" };
@@ -66,7 +67,7 @@ export class AdminService {
   async deletePost(postId: string): Promise<{ message: string }> {
     const post = await adminRepository.getPostById(postId);
     if (!post) {
-      throw new Error("Post not found");
+      throw new HttpError(404, "Post not found");
     }
     const userId = post.author._id.toString();
     await adminRepository.deletePost(postId);

@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { FollowService } from "../service/follow.service";
-import { HttpError } from "../../../errors/http-error";
+import { sendSafeError } from "../../../utils/api-response";
 
 const followService = new FollowService();
 
@@ -29,10 +29,7 @@ export class FollowController {
         data: { follower: follow?.follower, following: follow?.following },
       });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 
@@ -65,10 +62,7 @@ export class FollowController {
         },
       });
     } catch (error: any) {
-      res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
   getMyFollowers = async (req: Request, res: Response) => {
@@ -92,10 +86,7 @@ export class FollowController {
         data,
       });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 
@@ -119,10 +110,7 @@ export class FollowController {
         data,
       });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 
@@ -148,10 +136,7 @@ export class FollowController {
         data,
       });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 
@@ -176,10 +161,7 @@ export class FollowController {
         data,
       });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 
@@ -208,10 +190,7 @@ export class FollowController {
         isFollowing,
       });
     } catch (error: any) {
-      res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 }
