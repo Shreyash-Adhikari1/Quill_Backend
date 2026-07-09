@@ -5,7 +5,7 @@ import followRouter from "./features/follow/route/follow.route";
 import commentRouter from "./features/posts/route/comment.route";
 import postRouter from "./features/posts/route/post.route";
 import userRouter from "./features/user/route/user.route";
-import express, { Application } from "express";
+import express, { Application, NextFunction, Request, Response } from "express";
 import passport from "passport";
 import bodyParser from "body-parser";
 import cookieParser from "cookie-parser";
@@ -13,11 +13,43 @@ import { generateCSRFToken, globalErrorHandler, securityMiddleware, validateCSRF
 
 const app: Application = express();
 
+function rejectUploadTraversal(req: Request, res: Response, next: NextFunction) {
+  const rawPath = req.path || "";
+  let decodedPath = rawPath;
+
+  try {
+    decodedPath = decodeURIComponent(rawPath);
+  } catch {
+    return res.status(400).json({ success: false, message: "Invalid upload path" });
+  }
+
+  const normalizedPath = decodedPath.replace(/\\/g, "/");
+  if (
+    normalizedPath.includes("..") ||
+    normalizedPath.includes("\0") ||
+    normalizedPath.split("/").some((segment) => segment.startsWith("."))
+  ) {
+    // Path traversal defense: uploaded files are served only by generated filenames inside the uploads directory.
+    return res.status(400).json({ success: false, message: "Invalid upload path" });
+  }
+
+  next();
+}
+
 // Helmet, CORS, global rate limiting, and Mongo sanitization are mounted before routes to reduce OWASP header, CSRF, DoS, and NoSQL injection risks.
 app.use(securityMiddleware);
 
 // Static uploads are served from the project uploads folder so multer profile images render in the frontend.
-app.use("/uploads", express.static(path.resolve(process.cwd(), "uploads")));
+// The traversal guard and dotfile denial prevent crafted paths from escaping or probing hidden files.
+app.use(
+  "/uploads",
+  rejectUploadTraversal,
+  express.static(path.resolve(process.cwd(), "uploads"), {
+    dotfiles: "deny",
+    fallthrough: false,
+    index: false,
+  }),
+);
 
 // Middleware
 // Explicit 100kb parser limits reduce request-flooding and memory-exhaustion DoS risk before data reaches controllers.
