@@ -3,11 +3,30 @@ import { CommentDTO } from "../dto/comment.dto";
 import { IPostComment } from "../model/post.model";
 import { PostCommentRepository } from "../repository/comment.repository";
 import { PostRepository } from "../repository/post.repository";
+import { FollowRepository } from "../../follow/repository/follow.repository";
+import { HttpError } from "../../../errors/http-error";
 
 const commentRepository = new PostCommentRepository();
 const postRepository = new PostRepository();
+const followRepository = new FollowRepository();
+
+function authorIdOfPost(post: any) {
+  return String(post?.author?._id ?? post?.author);
+}
 
 export class CommentService {
+  private async assertCanCommentOnPost(userId: string, postId: string) {
+    const post = await postRepository.getPostById(postId);
+    if (!post) throw new HttpError(404, "Post not found");
+
+    const authorId = authorIdOfPost(post);
+    if (authorId === userId || post.visibility === "public") return;
+    if (post.visibility === "followers" && (await followRepository.isFollowing(userId, authorId))) return;
+
+    // Access-control defense: comment creation cannot be used to interact with private/followers-only posts by guessing IDs.
+    throw new HttpError(403, "You are not allowed to access this post");
+  }
+
   async createComment(
     data: CommentDTO,
     userId: string,
@@ -18,16 +37,19 @@ export class CommentService {
     postId = postId.trim();
 
     if (!userId || !postId) {
-      throw new Error("UserId and PostId are required");
+      throw new HttpError(400, "UserId and PostId are required");
     }
 
     if (!Types.ObjectId.isValid(userId)) {
-      throw new Error("Invalid userId");
+      throw new HttpError(400, "Invalid userId");
     }
 
     if (!Types.ObjectId.isValid(postId)) {
-      throw new Error("Invalid postId");
+      throw new HttpError(400, "Invalid postId");
     }
+
+    await this.assertCanCommentOnPost(userId, postId);
+
     const commentDetails = {
       commentText: data.commentText,
       userId: new Types.ObjectId(userId),
@@ -47,10 +69,10 @@ export class CommentService {
   ): Promise<{ message: string }> {
     const comment = await commentRepository.getCommentById(commentId);
     if (!comment) {
-      throw new Error("Comment Doesnt Exist");
+      throw new HttpError(404, "Comment not found");
     }
     if (comment.userId.toString() !== userId) {
-      throw new Error("You can only delete your own comments");
+      throw new HttpError(403, "You can only delete your own comments");
     }
 
     const postId = comment.postId;
@@ -68,12 +90,12 @@ export class CommentService {
   ): Promise<{ message: string }> {
     const comment = await commentRepository.getCommentById(commentId);
     if (!comment) {
-      throw new Error("Comment Doesnt Exist");
+      throw new HttpError(404, "Comment not found");
     }
     const user = new Types.ObjectId(userId);
     // Check if user already liked
     if (comment.likedBy?.some((id) => id.equals(user))) {
-      throw new Error("You have already liked this comment");
+      throw new HttpError(409, "You have already liked this comment");
     }
 
     await commentRepository.likeComment(commentId, userId);
@@ -91,7 +113,7 @@ export class CommentService {
   ): Promise<{ message: string }> {
     const comment = await commentRepository.getCommentById(commentId);
     if (!comment) {
-      throw new Error("Comment Doesnt Exist");
+      throw new HttpError(404, "Comment not found");
     }
     const user = new Types.ObjectId(userId);
 
@@ -101,7 +123,7 @@ export class CommentService {
       id.equals(user),
     );
     if (!hasLiked) {
-      throw new Error("You have not liked this comment");
+      throw new HttpError(409, "You have not liked this comment");
     }
 
     await commentRepository.unlikeComment(commentId, userId);

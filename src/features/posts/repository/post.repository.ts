@@ -5,7 +5,7 @@ import { UserModel } from "../../user/model/user.model";
 export interface PostRepositoryInterface {
   getAllPosts(skip?: number, limit?: number): Promise<IPost[]>;
   getPostById(postId: string): Promise<IPost | null>;
-  getPostsByUser(userId: string): Promise<IPost[]>;
+  getPostsByUser(userId: string, viewerId?: string): Promise<IPost[]>;
   createPost(post: Partial<IPost>): Promise<IPost>;
   editPost(postId: string, updatedData: Partial<IPost>): Promise<IPost | null>;
   deletePost(postId: string): Promise<IPost | null>;
@@ -58,6 +58,8 @@ export class PostRepository implements PostRepositoryInterface {
     return PostModel.find({
       author: { $in: nonAdminAuthorIds },
       isDeleted: false,
+      // Following feed may show public and followers-only posts from followed users, but never private notes.
+      visibility: { $in: ["public", "followers"] },
     })
       .sort({ likeCount: -1, createdAt: -1 })
       .skip(skip)
@@ -72,11 +74,16 @@ export class PostRepository implements PostRepositoryInterface {
       .exec();
   }
 
-  async getPostsByUser(userId: string, skip = 0, limit = 10): Promise<IPost[]> {
+  async getPostsByUser(userId: string, viewerId?: string, skip = 0, limit = 10): Promise<IPost[]> {
     const [nonAdminAuthorId] = await this.nonAdminAuthorIds([userId]);
     if (!nonAdminAuthorId) return [];
 
-    return PostModel.find({ author: userId, isDeleted: false })
+    const visibilityFilter: Record<string, unknown> =
+      viewerId && viewerId === userId
+        ? {}
+        : { visibility: "public" };
+
+    return PostModel.find({ author: userId, isDeleted: false, ...visibilityFilter })
       .sort({ createdAt: -1 })
       .populate("author", "username fullName avatarUrl")
       .skip(skip)
