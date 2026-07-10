@@ -15,7 +15,11 @@ function authorIdOfPost(post: any) {
 }
 
 export class CommentService {
-  private async assertCanCommentOnPost(userId: string, postId: string) {
+  private async assertCanAccessPost(userId: string, postId: string) {
+    if (!Types.ObjectId.isValid(userId) || !Types.ObjectId.isValid(postId)) {
+      throw new HttpError(400, "Invalid post access request");
+    }
+
     const post = await postRepository.getPostById(postId);
     if (!post) throw new HttpError(404, "Post not found");
 
@@ -23,7 +27,7 @@ export class CommentService {
     if (authorId === userId || post.visibility === "public") return;
     if (post.visibility === "followers" && (await followRepository.isFollowing(userId, authorId))) return;
 
-    // Access-control defense: comment creation cannot be used to interact with private/followers-only posts by guessing IDs.
+    // Access-control defense: comment APIs cannot be used to interact with private/followers-only posts by guessing IDs.
     throw new HttpError(403, "You are not allowed to access this post");
   }
 
@@ -48,7 +52,7 @@ export class CommentService {
       throw new HttpError(400, "Invalid postId");
     }
 
-    await this.assertCanCommentOnPost(userId, postId);
+    await this.assertCanAccessPost(userId, postId);
 
     const commentDetails = {
       commentText: data.commentText,
@@ -67,10 +71,15 @@ export class CommentService {
     userId: string,
     commentId: string,
   ): Promise<{ message: string }> {
+    if (!Types.ObjectId.isValid(userId) || !Types.ObjectId.isValid(commentId)) {
+      throw new HttpError(400, "Invalid comment delete request");
+    }
     const comment = await commentRepository.getCommentById(commentId);
     if (!comment) {
       throw new HttpError(404, "Comment not found");
     }
+    await this.assertCanAccessPost(userId, comment.postId.toString());
+
     if (comment.userId.toString() !== userId) {
       throw new HttpError(403, "You can only delete your own comments");
     }
@@ -88,17 +97,25 @@ export class CommentService {
     commentId: string,
     userId: string,
   ): Promise<{ message: string }> {
+    if (!Types.ObjectId.isValid(userId) || !Types.ObjectId.isValid(commentId)) {
+      throw new HttpError(400, "Invalid comment like request");
+    }
     const comment = await commentRepository.getCommentById(commentId);
     if (!comment) {
       throw new HttpError(404, "Comment not found");
     }
+    await this.assertCanAccessPost(userId, comment.postId.toString());
+
     const user = new Types.ObjectId(userId);
     // Check if user already liked
     if (comment.likedBy?.some((id) => id.equals(user))) {
       throw new HttpError(409, "You have already liked this comment");
     }
 
-    await commentRepository.likeComment(commentId, userId);
+    const updatedComment = await commentRepository.likeComment(commentId, userId);
+    if (!updatedComment) {
+      throw new HttpError(409, "You have already liked this comment");
+    }
 
     // await PostCommentModel.findByIdAndUpdate(commentId, {
     //   $push: { likedBy: user },
@@ -111,10 +128,15 @@ export class CommentService {
     commentId: string,
     userId: string,
   ): Promise<{ message: string }> {
+    if (!Types.ObjectId.isValid(userId) || !Types.ObjectId.isValid(commentId)) {
+      throw new HttpError(400, "Invalid comment unlike request");
+    }
     const comment = await commentRepository.getCommentById(commentId);
     if (!comment) {
       throw new HttpError(404, "Comment not found");
     }
+    await this.assertCanAccessPost(userId, comment.postId.toString());
+
     const user = new Types.ObjectId(userId);
 
     // Check if user has liked before unliking
@@ -126,7 +148,10 @@ export class CommentService {
       throw new HttpError(409, "You have not liked this comment");
     }
 
-    await commentRepository.unlikeComment(commentId, userId);
+    const updatedComment = await commentRepository.unlikeComment(commentId, userId);
+    if (!updatedComment) {
+      throw new HttpError(409, "You have not liked this comment");
+    }
 
     // await PostCommentModel.findByIdAndUpdate(commentId, {
     //   $pull: { likedBy: user },
@@ -135,7 +160,8 @@ export class CommentService {
     return { message: "Comment Unliked" };
   }
 
-  async getCommentByPost(postId: string) {
+  async getCommentByPost(postId: string, userId: string) {
+    await this.assertCanAccessPost(userId, postId);
     return await commentRepository.getCommentsForPost(postId);
   }
 }

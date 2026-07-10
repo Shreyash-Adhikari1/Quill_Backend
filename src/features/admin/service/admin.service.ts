@@ -3,9 +3,12 @@ import { IUser } from "../../user/model/user.model";
 import { UserRepository } from "../../user/repository/user.repository";
 import { AdminRepository } from "../repository/admin.repository";
 import { HttpError } from "../../../errors/http-error";
+import { UserService } from "../../user/service/user.service";
+import { auditActivity } from "../../audit/service/audit.service";
 
 const adminRepository = new AdminRepository();
 const userRepository = new UserRepository();
+const userService = new UserService();
 
 export class AdminService {
   // Helper Function || even Admin Doesnt get to see passwords
@@ -35,11 +38,20 @@ export class AdminService {
 
   //User Delete logic
 
-  async deleteUser(userId: string) {
+  async deleteUser(actorId: string, userId: string, context?: { ip?: string; userAgent?: string }) {
+    if (actorId === userId) {
+      throw new HttpError(400, "Admins cannot delete their own account");
+    }
+
     const user = await adminRepository.getUserById(userId);
     if (!user) throw new HttpError(404, "User not found");
 
-    await adminRepository.deleteUser(userId);
+    if (user.role === "admin" && (await adminRepository.countAdmins()) <= 1) {
+      throw new HttpError(400, "Cannot delete the last admin account");
+    }
+
+    await userService.deleteUser(userId, context);
+    await auditActivity({ userId: actorId, action: "admin.user_deleted", metadata: { targetUserId: userId }, ...context });
     return { message: "User deleted successfully" };
   }
 

@@ -38,6 +38,9 @@ export class PostService {
     postId: string,
     data: EditPostDTO,
   ): Promise<IPost> {
+    if (!Types.ObjectId.isValid(userId) || !Types.ObjectId.isValid(postId)) {
+      throw new HttpError(400, "Invalid post edit request");
+    }
     const post = await postRepository.getPostById(postId);
     if (!post) {
       throw new HttpError(404, "Post not found");
@@ -60,6 +63,9 @@ export class PostService {
     userId: string,
     postId: string,
   ): Promise<{ message: string }> {
+    if (!Types.ObjectId.isValid(userId) || !Types.ObjectId.isValid(postId)) {
+      throw new HttpError(400, "Invalid post delete request");
+    }
     const post = await postRepository.getPostById(postId);
     if (!post) {
       throw new HttpError(404, "Post not found");
@@ -100,6 +106,9 @@ export class PostService {
   }
 
   async assertCanViewPost(userId: string, postId: string): Promise<IPost> {
+    if (!Types.ObjectId.isValid(userId) || !Types.ObjectId.isValid(postId)) {
+      throw new HttpError(400, "Invalid post access request");
+    }
     const post = await postRepository.getPostById(postId);
     if (!post) {
       throw new HttpError(404, "Post not found");
@@ -123,7 +132,10 @@ export class PostService {
       return { message: "Post already upvoted" };
     }
 
-    await postRepository.likePost(postId, userId);
+    const updatedPost = await postRepository.likePost(postId, userId);
+    if (!updatedPost) {
+      return { message: "Post already upvoted" };
+    }
 
     // await PostModel.findByIdAndUpdate(postId, {
     //   $push: { likedBy: user },
@@ -143,7 +155,10 @@ export class PostService {
       return { message: "Post was not upvoted" };
     }
 
-    await postRepository.unlikePost(postId, userId);
+    const updatedPost = await postRepository.unlikePost(postId, userId);
+    if (!updatedPost) {
+      return { message: "Post was not upvoted" };
+    }
 
     // await PostModel.findByIdAndUpdate(postId, {
     //   $pull: { likedBy: user },

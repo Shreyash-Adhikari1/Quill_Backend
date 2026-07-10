@@ -1,10 +1,19 @@
-import { Router } from "express";
+import { NextFunction, Request, Response, Router } from "express";
 import { AdminController } from "../controller/admin.controller";
 import { authMiddleware } from "../../../middleware/auth.middleware";
 import { adminOnly } from "../../../middleware/admin.middleware";
 
 export const adminRouter = Router();
 const adminController = new AdminController();
+
+function requireAdminConfirmation(req: Request, res: Response, next: NextFunction) {
+  if (req.get("X-Confirm-Action") !== "DELETE") {
+    // Step-up friction for bulk destructive admin actions: a stolen admin page click should not wipe data silently.
+    return res.status(400).json({ success: false, message: "Bulk delete confirmation header is required" });
+  }
+
+  next();
+}
 
 // ====================================== ADMIN-AUDIT ROUTES ===============================
 adminRouter.get(
@@ -56,6 +65,7 @@ adminRouter.delete(
   "/users/deleteAll",
   authMiddleware,
   adminOnly,
+  requireAdminConfirmation,
   adminController.deleteAllUsers,
 );
 
@@ -63,6 +73,7 @@ adminRouter.delete(
   "/users/delete/:userId",
   authMiddleware,
   adminOnly,
+  requireAdminConfirmation,
   adminController.deleteUser,
 );
 
@@ -95,6 +106,7 @@ adminRouter.delete(
   "/posts/deleteAll/:userId",
   authMiddleware,
   adminOnly,
+  requireAdminConfirmation,
   adminController.deleteAllPostsByUser,
 );
 
@@ -102,6 +114,7 @@ adminRouter.delete(
   "/posts/delete/:postId",
   authMiddleware,
   adminOnly,
+  requireAdminConfirmation,
   adminController.deletePost,
 );
 

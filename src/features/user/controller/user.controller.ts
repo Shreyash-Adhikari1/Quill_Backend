@@ -3,7 +3,10 @@ import {
   ChangePasswordDTO,
   EditUserDTO,
   LoginUserDTO,
+  MfaDisableDTO,
+  MfaSetupDTO,
   OtpDTO,
+  ProfileEditDTO,
   RegisterUserDTO,
   ResetPasswordDTO,
   VerifyEmailDTO,
@@ -11,6 +14,7 @@ import {
 import { UserService } from "../service/user.service";
 import { verifyRecaptchaToken } from "../service/captcha.service";
 import { sendSafeError } from "../../../utils/api-response";
+import { clearStrictCookieOptions, strictCookieOptions } from "../../../utils/security";
 
 const userService = new UserService();
 
@@ -19,12 +23,7 @@ function requestContext(req: Request) {
 }
 
 function setAuthCookie(res: Response, token: string) {
-  res.cookie("token", token, {
-    httpOnly: true, // Prevents JavaScript access to the JWT, blocking XSS token theft.
-    secure: process.env.NODE_ENV === "production", // Sends the JWT only over HTTPS in production.
-    sameSite: "strict", // Prevents the cookie being sent on cross-site requests, reducing CSRF risk.
-    maxAge: 7 * 24 * 60 * 60 * 1000, // Gives the auth cookie an explicit seven-day lifetime.
-  });
+  res.cookie("token", token, strictCookieOptions(7 * 24 * 60 * 60 * 1000)); // httpOnly/Secure/SameSite cookie blocks JS token theft and CSRF-by-default.
 }
 
 export class UserController {
@@ -81,12 +80,7 @@ export class UserController {
       const loginResult = await userService.loginUser(email, password, requestContext(req));
 
       if (loginResult.requiresOtp && loginResult.mfaToken) {
-        res.cookie("mfa-token", loginResult.mfaToken, {
-          httpOnly: true, // The temporary MFA challenge token is also hidden from JavaScript to prevent XSS theft.
-          secure: process.env.NODE_ENV === "production",
-          sameSite: "strict",
-          maxAge: 5 * 60 * 1000,
-        });
+        res.cookie("mfa-token", loginResult.mfaToken, strictCookieOptions(5 * 60 * 1000)); // Short-lived httpOnly MFA challenge token.
         return res.status(200).json({
           success: true,
           requiresOtp: true,
@@ -118,11 +112,7 @@ export class UserController {
         requestContext(req),
       );
 
-      res.clearCookie("mfa-token", {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
-      });
+      res.clearCookie("mfa-token", clearStrictCookieOptions());
       setAuthCookie(res, result.token);
 
       return res.status(200).json({ success: true, user: result.user });
@@ -134,16 +124,8 @@ export class UserController {
   logoutUser = async (req: Request, res: Response) => {
     await userService.invalidateSessions((req as any).user.id, requestContext(req));
 
-    res.clearCookie("token", {
-      httpOnly: true, // Matches the login cookie so the browser removes the protected JWT cookie.
-      secure: process.env.NODE_ENV === "production", // Uses the same HTTPS-only production setting as issuance.
-      sameSite: "strict", // Uses the same CSRF-resistant SameSite attribute as issuance.
-    });
-    res.clearCookie("mfa-token", {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-    });
+    res.clearCookie("token", clearStrictCookieOptions()); // Matches the protected JWT cookie attributes so browsers remove it.
+    res.clearCookie("mfa-token", clearStrictCookieOptions());
 
     return res.status(200).json({ success: true, message: "Logged out successfully" });
   };
@@ -212,7 +194,7 @@ export class UserController {
 
   editProfile = async (req: Request, res: Response) => {
     try {
-      const editDetailsParsed = EditUserDTO.safeParse(req.body);
+      const editDetailsParsed = ProfileEditDTO.safeParse(req.body);
 
       if (!editDetailsParsed.success) {
         return res.status(400).json({
@@ -252,7 +234,10 @@ export class UserController {
 
   setupMfa = async (req: Request, res: Response) => {
     try {
-      const result = await userService.setupMfa((req as any).user.id);
+      const parsed = MfaSetupDTO.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ success: false, message: "Current password is required" });
+
+      const result = await userService.setupMfa((req as any).user.id, parsed.data.currentPassword);
       return res.status(200).json({ success: true, ...result });
     } catch (error: any) {
       return sendSafeError(res, error, "MFA setup failed");
@@ -273,10 +258,15 @@ export class UserController {
 
   disableMfa = async (req: Request, res: Response) => {
     try {
-      const parsed = OtpDTO.safeParse(req.body);
-      if (!parsed.success) return res.status(400).json({ success: false, message: "Invalid OTP" });
+      const parsed = MfaDisableDTO.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ success: false, message: "Invalid MFA disable request" });
 
-      const user = await userService.disableMfa((req as any).user.id, parsed.data.otp, requestContext(req));
+      const user = await userService.disableMfa(
+        (req as any).user.id,
+        parsed.data.otp,
+        parsed.data.currentPassword,
+        requestContext(req),
+      );
       return res.status(200).json({ success: true, user, message: "MFA disabled" });
     } catch (error: any) {
       return sendSafeError(res, error, "MFA disable failed");

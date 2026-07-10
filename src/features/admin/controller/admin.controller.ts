@@ -87,9 +87,13 @@ export class AdminController {
       // Extract filename from multer
       const avatarFileName = req.file?.filename;
 
-      const updatedUser = await userService.updateUser(userId as string, {
+      const updatedUser = await userService.updateUserAsAdmin(userId as string, {
         ...editDetailsParsed.data,
-        avatarUrl: avatarFileName,
+        avatarUrl: avatarFileName ?? editDetailsParsed.data.avatarUrl,
+      }, {
+        actorId: (req as any).user.id,
+        ip: req.ip,
+        userAgent: req.get("user-agent"),
       });
       return res.status(200).json({
         success: true,
@@ -146,7 +150,10 @@ export class AdminController {
           message: "user not found",
         });
       }
-      await adminService.deleteUser(userId as string);
+      await adminService.deleteUser((req as any).user.id, userId as string, {
+        ip: req.ip,
+        userAgent: req.get("user-agent"),
+      });
       return res
         .status(200)
         .json({ success: true, message: "User Deleted", user: userId });

@@ -1,17 +1,16 @@
 import crypto from "crypto";
 import { NextFunction, Request, Response } from "express";
 import logger from "../utils/logger";
+import { requireJwtSecret, strictCookieOptions } from "../utils/security";
 
 export const generateCSRFToken = (_req: Request, res: Response) => {
   // Generates an unpredictable token so attackers cannot forge state-changing requests.
-  const token = crypto.randomBytes(32).toString("hex");
+  const nonce = crypto.randomBytes(32).toString("hex");
+  const secret = requireJwtSecret();
+  const signature = crypto.createHmac("sha256", secret).update(nonce).digest("hex");
+  const token = `${nonce}.${signature}`;
 
-  res.cookie("csrf-token", token, {
-    httpOnly: false, // Intentionally readable by frontend JavaScript for the double-submit cookie pattern.
-    secure: process.env.NODE_ENV === "production", // Sends the token cookie only over HTTPS in production.
-    sameSite: "strict", // Prevents the browser from sending this cookie on cross-site requests.
-    maxAge: 24 * 60 * 60 * 1000, // Limits token lifetime to reduce replay risk.
-  });
+  res.cookie("csrf-token", token, strictCookieOptions(24 * 60 * 60 * 1000, false)); // Readable by JS for double-submit, but still Secure/SameSite.
 
   return token;
 };
@@ -36,6 +35,25 @@ export const validateCSRFToken = (req: Request, res: Response, next: NextFunctio
   // Equal length is required before timingSafeEqual; mismatched length is automatically invalid.
   if (cookieBuffer.length !== headerBuffer.length || !crypto.timingSafeEqual(cookieBuffer, headerBuffer)) {
     // Constant-time comparison prevents timing attacks that reveal partial token matches.
+    logger.warn("CSRF token mismatch", { ip: req.ip, path: req.path, method: req.method });
+    return res.status(403).json({ error: "Invalid CSRF token" });
+  }
+
+  const [nonce, signature] = cookieToken.split(".");
+  const secret = requireJwtSecret();
+  const expectedSignature = nonce
+    ? crypto.createHmac("sha256", secret).update(nonce).digest("hex")
+    : "";
+
+  if (!nonce || !signature || signature.length !== expectedSignature.length) {
+    logger.warn("CSRF token mismatch", { ip: req.ip, path: req.path, method: req.method });
+    return res.status(403).json({ error: "Invalid CSRF token" });
+  }
+
+  const signatureBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expectedSignature);
+  if (!crypto.timingSafeEqual(signatureBuffer, expectedBuffer)) {
+    // Server-issued token verification stops attackers from choosing arbitrary matching cookie/header pairs.
     logger.warn("CSRF token mismatch", { ip: req.ip, path: req.path, method: req.method });
     return res.status(403).json({ error: "Invalid CSRF token" });
   }
