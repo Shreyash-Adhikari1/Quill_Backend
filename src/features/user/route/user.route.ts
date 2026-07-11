@@ -1,5 +1,6 @@
 import { Router } from "express";
 import {
+  adminOnly,
   authLimiter,
   authMiddleware,
   passwordResetLimiter,
@@ -45,7 +46,7 @@ userRouter.post("/me/import", authMiddleware, userController.importMyData);
 userRouter.delete("/me", authMiddleware, userController.deleteUser);
 
 // get routes
-userRouter.get("/users", authMiddleware, userController.getAllusers);
+userRouter.get("/users", authMiddleware, adminOnly, userController.getAllusers);
 
 userRouter.get("/:userId", authMiddleware, userController.getUserProfile);
 

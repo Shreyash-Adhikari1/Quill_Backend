@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import dotenv from "dotenv"
 import logger from "../utils/logger";
 import { UserModel } from "../features/user/model/user.model";
+import { requireJwtSecret } from "../utils/security";
 
 // if app-lication is a club
 // A middleware acts as a bouncer between requests and controller
@@ -34,7 +35,7 @@ export const authMiddleware = (
     try {
         const decoded =jwt.verify( // this is the verification bit
             token,
-            process.env.JWT_SECRET || process.env.JWT_SECRET_TOKEN!
+            requireJwtSecret()
         )as JwtPayload;
 
         // Session version checking lets logout and password changes invalidate already-issued JWTs.

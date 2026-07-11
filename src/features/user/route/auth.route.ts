@@ -1,16 +1,18 @@
 import { Router } from "express";
 import bcrypt from "bcrypt";
-import jwt from "jsonwebtoken";
+import crypto from "crypto";
 import passport from "passport";
 import { Strategy as GoogleStrategy, Profile } from "passport-google-oauth20";
 import { UserModel } from "../model/user.model";
 import { cleanOAuthDisplayName } from "../../../utils/xss";
+import { clearStrictCookieOptions, strictCookieOptions } from "../../../utils/security";
+import { UserService } from "../service/user.service";
 
 const authRouter = Router();
+const userService = new UserService();
 
 type GoogleUser = {
   _id: unknown;
-  role: string;
 };
 
 function makeUsername(profile: Profile, email: string) {
@@ -34,6 +36,9 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
         try {
           const email = profile.emails?.[0]?.value?.toLowerCase();
           if (!email) return done(new Error("Google account did not provide an email"));
+          if ((profile._json as any)?.email_verified === false) {
+            return done(new Error("Google account email is not verified"));
+          }
 
           let user = await UserModel.findOne({ googleId: profile.id }).exec();
           if (!user) {
@@ -75,35 +80,47 @@ authRouter.get("/google", (req, res, next) => {
     return res.status(501).send("Google OAuth is not configured on the backend.");
   }
 
+  const state = crypto.randomBytes(32).toString("hex");
+  res.cookie("oauth-state", state, strictCookieOptions(5 * 60 * 1000, true)); // OAuth CSRF defense: callback must echo this server-issued state.
+
   return passport.authenticate("google", {
     scope: ["profile", "email"],
     session: false,
+    state,
   })(req, res, next);
 });
 
 authRouter.get("/google/callback", (req, res, next) => {
-  passport.authenticate("google", { session: false }, (error: Error | null, user?: GoogleUser) => {
+  const cookieState = req.cookies?.["oauth-state"];
+  const queryState = req.query.state;
+  if (typeof cookieState !== "string" || typeof queryState !== "string" || cookieState !== queryState) {
+    return res.redirect(`${process.env.CLIENT_URL || "https://localhost:3000"}/login?oauth=state`);
+  }
+
+  passport.authenticate("google", { session: false }, async (error: Error | null, user?: GoogleUser) => {
     if (error || !user) {
+      res.clearCookie("oauth-state", clearStrictCookieOptions());
       return res.redirect(`${process.env.CLIENT_URL || "https://localhost:3000"}/login?oauth=failed`);
     }
 
-    const token = jwt.sign(
-      {
-        id: String(user._id),
-        role: user.role,
-      },
-      process.env.JWT_SECRET || process.env.JWT_SECRET_TOKEN!,
-      { expiresIn: "10d" },
-    );
+    try {
+      const loginResult = await userService.loginOAuthUser(String(user._id), {
+        ip: req.ip,
+        userAgent: req.get("user-agent"),
+      });
 
-    res.cookie("token", token, {
-      httpOnly: true, // Prevents frontend JavaScript from reading the JWT after OAuth.
-      secure: process.env.NODE_ENV === "production", // Use HTTPS-only cookies in production.
-      sameSite: "strict", // Keeps the cookie off cross-site requests for CSRF defense in depth.
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+      res.clearCookie("oauth-state", clearStrictCookieOptions());
+      if (loginResult.requiresOtp && loginResult.mfaToken) {
+        res.cookie("mfa-token", loginResult.mfaToken, strictCookieOptions(5 * 60 * 1000));
+        return res.redirect(`${process.env.CLIENT_URL || "https://localhost:3000"}/verify-login-otp`);
+      }
 
-    return res.redirect(`${process.env.CLIENT_URL || "https://localhost:3000"}/feed`);
+      res.cookie("token", loginResult.token, strictCookieOptions(7 * 24 * 60 * 60 * 1000)); // Same secure JWT cookie settings as password login.
+      return res.redirect(`${process.env.CLIENT_URL || "https://localhost:3000"}/feed`);
+    } catch {
+      res.clearCookie("oauth-state", clearStrictCookieOptions());
+      return res.redirect(`${process.env.CLIENT_URL || "https://localhost:3000"}/login?oauth=failed`);
+    }
   })(req, res, next);
 });
 

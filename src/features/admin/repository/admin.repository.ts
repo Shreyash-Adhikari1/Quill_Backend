@@ -7,6 +7,7 @@ export interface IAdminRepository {
   getUserById(userId: string): Promise<IUser | null>;
   getUserByUsername(username: string): Promise<IUser | null>;
   getUserByEmail(email: string): Promise<IUser | null>;
+  countAdmins(): Promise<number>;
   deleteUser(userId: string): Promise<IUser | null>;
   deleteAllUsers(): Promise<{ deletedCount: number }>; // returns how many users deleted , thats it
 
@@ -34,6 +35,9 @@ export class AdminRepository implements IAdminRepository {
   }
   async getUserByEmail(email: string): Promise<IUser | null> {
     return UserModel.findOne({ email }).exec();
+  }
+  async countAdmins(): Promise<number> {
+    return UserModel.countDocuments({ role: "admin" }).exec();
   }
   async deleteUser(userId: string): Promise<IUser | null> {
     return UserModel.findByIdAndDelete(userId).exec();

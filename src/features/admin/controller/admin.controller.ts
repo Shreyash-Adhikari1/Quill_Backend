@@ -6,6 +6,7 @@ import { UserService } from "../../user/service/user.service";
 import { PostService } from "../../posts/service/post.service";
 import { EditUserDTO } from "../../user/dto/user.dto";
 import { getAuditLogs } from "../../audit/service/audit.service";
+import { sendSafeError } from "../../../utils/api-response";
 
 const adminService = new AdminService();
 const userService = new UserService();
@@ -21,10 +22,7 @@ export class AdminController {
         users: users,
       });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 
@@ -44,10 +42,7 @@ export class AdminController {
         user: user,
       });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 
@@ -71,10 +66,7 @@ export class AdminController {
         .status(200)
         .json({ success: true, message: "User Found", user: user });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 
@@ -95,9 +87,13 @@ export class AdminController {
       // Extract filename from multer
       const avatarFileName = req.file?.filename;
 
-      const updatedUser = await userService.updateUser(userId as string, {
+      const updatedUser = await userService.updateUserAsAdmin(userId as string, {
         ...editDetailsParsed.data,
-        avatarUrl: avatarFileName,
+        avatarUrl: avatarFileName ?? editDetailsParsed.data.avatarUrl,
+      }, {
+        actorId: (req as any).user.id,
+        ip: req.ip,
+        userAgent: req.get("user-agent"),
       });
       return res.status(200).json({
         success: true,
@@ -105,10 +101,7 @@ export class AdminController {
         user: updatedUser,
       });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 
@@ -126,10 +119,7 @@ export class AdminController {
         ...result,
       });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 
@@ -147,10 +137,7 @@ export class AdminController {
         logs: result.logs,
       });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 
@@ -163,15 +150,15 @@ export class AdminController {
           message: "user not found",
         });
       }
-      await adminService.deleteUser(userId as string);
+      await adminService.deleteUser((req as any).user.id, userId as string, {
+        ip: req.ip,
+        userAgent: req.get("user-agent"),
+      });
       return res
         .status(200)
         .json({ success: true, message: "User Deleted", user: userId });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 
@@ -182,10 +169,7 @@ export class AdminController {
         .status(200)
         .json({ success: true, message: "All users deleted" });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 
@@ -199,10 +183,7 @@ export class AdminController {
         posts: posts,
       });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 
@@ -226,10 +207,7 @@ export class AdminController {
         posts: userPosts,
       });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 
@@ -248,10 +226,7 @@ export class AdminController {
         post: post,
       });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 
@@ -269,10 +244,7 @@ export class AdminController {
         message: "Post Deleted Successfully",
       });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 
@@ -290,10 +262,7 @@ export class AdminController {
         message: "All Posts by the user deleted",
       });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 }

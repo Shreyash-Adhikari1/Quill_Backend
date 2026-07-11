@@ -22,6 +22,9 @@ export class FollowService {
     followerId: string,
     followingId: string,
   ): Promise<IFollow | null> {
+    if (!Types.ObjectId.isValid(followerId) || !Types.ObjectId.isValid(followingId)) {
+      throw new HttpError(400, "Invalid follow request");
+    }
     const userToFollow = new Types.ObjectId(followingId).toString();
     if (!userToFollow) {
       throw new HttpError(404, "User to follow not found");
@@ -52,6 +55,9 @@ export class FollowService {
     followerId: string,
     followingId: string,
   ): Promise<IFollow | null> {
+    if (!Types.ObjectId.isValid(followerId) || !Types.ObjectId.isValid(followingId)) {
+      throw new HttpError(400, "Invalid unfollow request");
+    }
     const userToUnfollow = new Types.ObjectId(followingId).toString();
     if (!userToUnfollow) {
       throw new HttpError(404, "User to unfollow not found");

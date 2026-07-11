@@ -10,7 +10,9 @@ export interface IUser extends Document {
   avatarUrl?: string;
   googleId?: string;
   otpSecret?: string;
+  pendingOtpSecret?: string;
   otpEnabled: boolean;
+  mfaFailedAttempts: number;
   failedLoginAttempts: number;
   lockUntil: Date | null;
   passwordHistory: string[];
@@ -19,8 +21,10 @@ export interface IUser extends Document {
   isVerified: boolean;
   emailVerificationCode?: string;
   emailVerificationExpires?: Date;
+  emailVerificationAttempts: number;
   resetPasswordCode?: string;
   resetPasswordExpires?: Date;
+  resetPasswordAttempts: number;
   followerCount: number;
   followingCount: number;
   postCount: number;
@@ -46,8 +50,12 @@ const UserSchema: Schema<IUser> = new mongoose.Schema(
     googleId: { type: String, sparse: true },
     // Stores the base32 TOTP secret; select:false prevents accidental exposure in normal queries.
     otpSecret: { type: String, select: false },
+    // Stores a not-yet-confirmed TOTP secret separately so setup cannot replace active MFA until the OTP is proven.
+    pendingOtpSecret: { type: String, select: false },
     // Tracks whether OTP/2FA is enabled so login can require a second verification factor.
     otpEnabled: { type: Boolean, default: false },
+    // Counts failed MFA verification attempts to slow online OTP guessing.
+    mfaFailedAttempts: { type: Number, default: 0 },
     // Counts consecutive failed logins for per-account brute-force protection even when attackers rotate IPs.
     failedLoginAttempts: { type: Number, default: 0 },
     // Temporarily locks an account until this time, preventing permanent lockout denial-of-service.
@@ -63,9 +71,13 @@ const UserSchema: Schema<IUser> = new mongoose.Schema(
     // Stores a hashed email verification OTP only temporarily; select:false prevents accidental exposure.
     emailVerificationCode: { type: String, select: false },
     emailVerificationExpires: { type: Date, select: false },
+    // Counts verification OTP failures per account/purpose, not just per source IP.
+    emailVerificationAttempts: { type: Number, default: 0 },
     // Stores a hashed reset OTP only temporarily, avoiding long-lived reset links in application data.
     resetPasswordCode: { type: String, select: false },
     resetPasswordExpires: { type: Date, select: false },
+    // Counts reset OTP failures per account so distributed IP guessing still gets stopped.
+    resetPasswordAttempts: { type: Number, default: 0 },
     followerCount: { type: Number, default: 0 },
     followingCount: { type: Number, default: 0 },
     postCount: { type: Number, default: 0 },

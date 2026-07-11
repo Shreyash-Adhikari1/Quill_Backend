@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { CreatePostDTO, EditPostDTO } from "../dto/post.dto";
 import { PostService } from "../service/post.service";
+import { sendSafeError } from "../../../utils/api-response";
 
 const postService = new PostService();
 
@@ -26,10 +27,7 @@ export class PostController {
         .status(200)
         .json({ success: true, message: "Post Created Successfully!", post });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Create post Failed!!(Internal Server)",
-      });
+      return sendSafeError(res, error, "Create post Failed");
     }
   };
 
@@ -68,10 +66,7 @@ export class PostController {
         post: updatedPost,
       });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Edit Post Failed!!",
-      });
+      return sendSafeError(res, error, "Edit Post Failed");
     }
   };
 
@@ -105,10 +100,7 @@ export class PostController {
         .status(200)
         .json({ success: true, message: "Post Deleted Successfully" });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Post Delete Failed",
-      });
+      return sendSafeError(res, error, "Post Delete Failed");
     }
   };
 
@@ -125,10 +117,7 @@ export class PostController {
         .status(200)
         .json({ success: true, message: "Posts fetched Successfully", posts });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Fetching Posts Failed",
-      });
+      return sendSafeError(res, error, "Fetching Posts Failed");
     }
   };
 
@@ -151,10 +140,7 @@ export class PostController {
         posts,
       });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 
@@ -169,7 +155,7 @@ export class PostController {
         });
       }
 
-      const posts = await postService.getPostsByUser(userId);
+      const posts = await postService.getPostsByUser(userId, userId);
 
       return res.status(200).json({
         success: true,
@@ -177,16 +163,14 @@ export class PostController {
         posts,
       });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Failed to fetch user posts",
-      });
+      return sendSafeError(res, error, "Failed to fetch user posts");
     }
   };
 
   getPostsByUser = async (req: Request, res: Response) => {
     try {
       const { userId } = req.params;
+      const viewerId = (req as any).user.id;
 
       if (!userId) {
         return res.status(400).json({
@@ -195,7 +179,7 @@ export class PostController {
         });
       }
 
-      const posts = await postService.getPostsByUser(userId as string);
+      const posts = await postService.getPostsByUser(userId as string, viewerId);
 
       return res.status(200).json({
         success: true,
@@ -203,10 +187,7 @@ export class PostController {
         posts,
       });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Failed to fetch user posts",
-      });
+      return sendSafeError(res, error, "Failed to fetch user posts");
     }
   };
 
@@ -228,10 +209,7 @@ export class PostController {
       const like = await postService.likePost(postId as string, userId);
       return res.status(201).json({ success: true, message: "Post Liked" });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 
@@ -253,10 +231,7 @@ export class PostController {
       const like = await postService.unlikePost(postId as string, userId);
       return res.status(201).json({ success: true, message: "Post Unliked" });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 }

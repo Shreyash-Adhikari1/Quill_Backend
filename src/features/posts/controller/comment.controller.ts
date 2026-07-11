@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { CommentDTO } from "../dto/comment.dto";
 import { CommentService } from "../service/comment.service";
+import { sendSafeError } from "../../../utils/api-response";
 
 const commentService = new CommentService();
 
@@ -38,10 +39,7 @@ export class CommentController {
         .status(200)
         .json({ success: true, message: "Comment Successful", comment });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 
@@ -72,10 +70,7 @@ export class CommentController {
         .status(201)
         .json({ success: true, message: "Commented Deleted Successfully" });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 
@@ -102,10 +97,7 @@ export class CommentController {
         .status(201)
         .json({ success: true, message: "Commented Liked" });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 
@@ -131,32 +123,32 @@ export class CommentController {
         .status(201)
         .json({ success: true, message: "Commented Unliked" });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 
   getCommentsForPost = async (req: Request, res: Response) => {
     try {
       const { postId } = req.params;
+      const userId = (req as any).user.id;
+      if (!userId) {
+        return res
+          .status(401)
+          .json({ success: false, message: "Unauthorized User" });
+      }
       if (!postId) {
         return res
           .status(404)
           .json({ success: false, message: "Post Not Found" });
       }
-      const comments = await commentService.getCommentByPost(postId as string);
+      const comments = await commentService.getCommentByPost(postId as string, userId);
       return res.status(200).json({
         success: true,
         message: "Comments Fetched Successfully",
         comments: comments,
       });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Internal Server Error",
-      });
+      return sendSafeError(res, error, "Internal Server Error");
     }
   };
 }

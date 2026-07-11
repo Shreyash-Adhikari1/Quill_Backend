@@ -67,14 +67,14 @@ export class UserRepository implements UserRepositoryInterface {
   async getUserWithSecrets(userId: string) {
     // Explicit opt-in prevents sensitive auth material from appearing in normal user reads.
     return UserModel.findById(userId)
-      .select("+password +otpSecret +passwordHistory +emailVerificationCode +emailVerificationExpires +resetPasswordCode +resetPasswordExpires")
+      .select("+password +otpSecret +pendingOtpSecret +passwordHistory +emailVerificationCode +emailVerificationExpires +resetPasswordCode +resetPasswordExpires")
       .exec();
   }
 
   async getUserByEmailWithSecrets(email: string) {
     // Used only for verification/reset flows that need hashed one-time codes.
     return UserModel.findOne({ email: email.toLowerCase() })
-      .select("+password +otpSecret +passwordHistory +emailVerificationCode +emailVerificationExpires +resetPasswordCode +resetPasswordExpires")
+      .select("+password +otpSecret +pendingOtpSecret +passwordHistory +emailVerificationCode +emailVerificationExpires +resetPasswordCode +resetPasswordExpires")
       .exec();
   }
 
@@ -84,12 +84,25 @@ export class UserRepository implements UserRepositoryInterface {
   }
 
   async updateUser(userId: string, updatedData: Partial<IUser>) {
+    const $set: Record<string, unknown> = {};
+    const $unset: Record<string, 1> = {};
+
+    for (const [key, value] of Object.entries(updatedData)) {
+      if (value === undefined) {
+        // Security cleanup: undefined values are intentional secret/OTP removals, so turn them into real $unset operations.
+        $unset[key] = 1;
+      } else {
+        $set[key] = value;
+      }
+    }
+
     return UserModel.findByIdAndUpdate(
       userId,
       {
-        $set: updatedData,
+        ...($set && Object.keys($set).length > 0 ? { $set } : {}),
+        ...($unset && Object.keys($unset).length > 0 ? { $unset } : {}),
       },
-      { new: true },
+      { new: true, runValidators: true },
     ).exec();
   }
 

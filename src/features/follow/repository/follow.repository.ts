@@ -6,6 +6,7 @@ export interface FollowRepositoryInterface {
   getFollowers(userId: string): Promise<IFollow[]>;
   getFollowing(userId: string): Promise<IFollow[]>;
   isFollowing(followerId: string, followingId: string): Promise<boolean>;
+  deleteFollowsForUser(userId: string): Promise<{ deletedCount: number }>;
 }
 
 export class FollowRepository implements FollowRepositoryInterface {
@@ -78,5 +79,11 @@ export class FollowRepository implements FollowRepositoryInterface {
       following: followingId,
     });
     return !!exists;
+  }
+
+  async deleteFollowsForUser(userId: string): Promise<{ deletedCount: number }> {
+    return FollowModel.deleteMany({
+      $or: [{ follower: userId }, { following: userId }],
+    }).exec();
   }
 }

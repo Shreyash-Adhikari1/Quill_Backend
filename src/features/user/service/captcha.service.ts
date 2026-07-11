@@ -86,13 +86,30 @@ export async function verifyRecaptchaToken(token: string | undefined, remoteIp?:
 
     const result = response.data;
     const actionMatches = !result.action || !expectedAction || result.action.toUpperCase() === expectedAction.toUpperCase();
+    const expectedHostname = process.env.RECAPTCHA_EXPECTED_HOSTNAME;
+    if (process.env.NODE_ENV === "production" && !expectedHostname) {
+      // Production bot protection must be bound to the expected host; otherwise stolen tokens from other sites are harder to spot.
+      logger.warn("reCAPTCHA expected hostname is not configured");
+      return false;
+    }
+    const hostnameMatches = !expectedHostname || result.hostname === expectedHostname;
+    const minScore = Number(process.env.RECAPTCHA_MIN_SCORE || "");
+    if (process.env.NODE_ENV === "production" && !Number.isFinite(minScore)) {
+      // Score-based deployments need an explicit threshold so bot checks do not silently degrade.
+      logger.warn("reCAPTCHA minimum score is not configured");
+      return false;
+    }
+    const scoreMatches = !Number.isFinite(minScore) || typeof result.score !== "number" || result.score >= minScore;
 
-    if (!result.success || !actionMatches) {
+    if (!result.success || !actionMatches || !hostnameMatches || !scoreMatches) {
       // Logs only metadata and error codes, never the token or secret.
       logger.warn("reCAPTCHA verification failed", {
         action: result.action,
         expectedAction,
         hostname: result.hostname,
+        expectedHostname,
+        score: result.score,
+        minScore: Number.isFinite(minScore) ? minScore : undefined,
         errors: result["error-codes"],
       });
       return false;

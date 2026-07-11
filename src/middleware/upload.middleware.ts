@@ -12,6 +12,8 @@ if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
+const ALLOWED_IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp"]);
+
 // Made such that test doesnt require dev file path
 // test can only access the memory bit
 const storage =
@@ -29,7 +31,9 @@ const storage =
         },
         filename: function (req, file, cb) {
           const uniqueSuffix = randomUUID();
-          const extension = path.extname(file.originalname);
+          const originalExtension = path.extname(file.originalname).toLowerCase();
+          // Path traversal defense: generated UUID filenames are used, and only known image extensions are preserved.
+          const extension = ALLOWED_IMAGE_EXTENSIONS.has(originalExtension) ? originalExtension : "";
           cb(null, `${file.fieldname}-${uniqueSuffix}${extension}`);
         },
       });

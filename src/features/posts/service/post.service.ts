@@ -4,10 +4,15 @@ import { PostRepository } from "../repository/post.repository";
 import { CreatePostDTO, EditPostDTO } from "../dto/post.dto";
 import { UserRepository } from "../../user/repository/user.repository";
 import { FollowRepository } from "../../follow/repository/follow.repository";
+import { HttpError } from "../../../errors/http-error";
 
 const userRepository = new UserRepository();
 const postRepository = new PostRepository();
 const followRepository = new FollowRepository();
+
+function authorIdOf(post: IPost) {
+  return String((post.author as any)?._id ?? post.author);
+}
 
 export class PostService {
   async createPost(userId: string, data: CreatePostDTO): Promise<IPost> {
@@ -33,19 +38,22 @@ export class PostService {
     postId: string,
     data: EditPostDTO,
   ): Promise<IPost> {
+    if (!Types.ObjectId.isValid(userId) || !Types.ObjectId.isValid(postId)) {
+      throw new HttpError(400, "Invalid post edit request");
+    }
     const post = await postRepository.getPostById(postId);
     if (!post) {
-      throw new Error("Post not found");
+      throw new HttpError(404, "Post not found");
     }
 
     // Ownership check (CRITICAL)
-    if (post.author._id.toString() !== userId) {
-      throw new Error("You are not allowed to edit this post");
+    if (authorIdOf(post) !== userId) {
+      throw new HttpError(403, "You are not allowed to edit this post");
     }
 
     const updatedPost = await postRepository.editPost(postId, data);
     if (!updatedPost) {
-      throw new Error("Failed to update post");
+      throw new HttpError(500, "Failed to update post");
     }
 
     return updatedPost;
@@ -55,13 +63,16 @@ export class PostService {
     userId: string,
     postId: string,
   ): Promise<{ message: string }> {
+    if (!Types.ObjectId.isValid(userId) || !Types.ObjectId.isValid(postId)) {
+      throw new HttpError(400, "Invalid post delete request");
+    }
     const post = await postRepository.getPostById(postId);
     if (!post) {
-      throw new Error("Post not found");
+      throw new HttpError(404, "Post not found");
     }
 
-    if (post.author._id.toString() !== userId) {
-      throw new Error("You are not allowed to delete this post");
+    if (authorIdOf(post) !== userId) {
+      throw new HttpError(403, "You are not allowed to delete this post");
     }
 
     await postRepository.deletePost(postId);
@@ -90,21 +101,41 @@ export class PostService {
     return await postRepository.getFollowingFeed(followingIds, skip, limit);
   }
 
-  async getPostsByUser(userId: string): Promise<IPost[]> {
-    return postRepository.getPostsByUser(userId);
+  async getPostsByUser(userId: string, viewerId?: string): Promise<IPost[]> {
+    return postRepository.getPostsByUser(userId, viewerId);
+  }
+
+  async assertCanViewPost(userId: string, postId: string): Promise<IPost> {
+    if (!Types.ObjectId.isValid(userId) || !Types.ObjectId.isValid(postId)) {
+      throw new HttpError(400, "Invalid post access request");
+    }
+    const post = await postRepository.getPostById(postId);
+    if (!post) {
+      throw new HttpError(404, "Post not found");
+    }
+
+    const authorId = authorIdOf(post);
+    if (authorId === userId || post.visibility === "public") return post;
+
+    if (post.visibility === "followers" && (await followRepository.isFollowing(userId, authorId))) {
+      return post;
+    }
+
+    // Access-control defense: private/followers-only post IDs must not become usable through likes/comments/direct API calls.
+    throw new HttpError(403, "You are not allowed to access this post");
   }
 
   async likePost(postId: string, userId: string): Promise<{ message: string }> {
-    const post = await postRepository.getPostById(postId);
-    if (!post) {
-      throw new Error("Post Doesnt Exist");
-    }
+    const post = await this.assertCanViewPost(userId, postId);
     const user = new Types.ObjectId(userId);
     if (post.likedBy.some((id) => id.equals(user))) {
       return { message: "Post already upvoted" };
     }
 
-    await postRepository.likePost(postId, userId);
+    const updatedPost = await postRepository.likePost(postId, userId);
+    if (!updatedPost) {
+      return { message: "Post already upvoted" };
+    }
 
     // await PostModel.findByIdAndUpdate(postId, {
     //   $push: { likedBy: user },
@@ -116,10 +147,7 @@ export class PostService {
     postId: string,
     userId: string,
   ): Promise<{ message: string }> {
-    const post = await postRepository.getPostById(postId);
-    if (!post) {
-      throw new Error("Post Doesnt Exist");
-    }
+    const post = await this.assertCanViewPost(userId, postId);
     const user = new Types.ObjectId(userId);
 
     const hasLiked = post.likedBy.some((id: Types.ObjectId) => id.equals(user));
@@ -127,7 +155,10 @@ export class PostService {
       return { message: "Post was not upvoted" };
     }
 
-    await postRepository.unlikePost(postId, userId);
+    const updatedPost = await postRepository.unlikePost(postId, userId);
+    if (!updatedPost) {
+      return { message: "Post was not upvoted" };
+    }
 
     // await PostModel.findByIdAndUpdate(postId, {
     //   $pull: { likedBy: user },

@@ -9,28 +9,36 @@ import {
   UserRepositoryInterface,
 } from "../repository/user.repository";
 import { IUser } from "../model/user.model";
-import { ChangePasswordDTO, EditUserDTO, RegisterUserDTO } from "../dto/user.dto";
+import { ChangePasswordDTO, EditUserDTO, PasswordPolicySchema, ProfileEditDTO, RegisterUserDTO } from "../dto/user.dto";
 import { HttpError } from "../../../errors/http-error";
 import { sendEmail } from "../../../config/email";
 import logger from "../../../utils/logger";
 import { auditActivity } from "../../audit/service/audit.service";
+import { requireJwtSecret, requireOtpSecret } from "../../../utils/security";
+import { PostRepository } from "../../posts/repository/post.repository";
+import { PostCommentRepository } from "../../posts/repository/comment.repository";
+import { FollowRepository } from "../../follow/repository/follow.repository";
 
 const userRepository: UserRepositoryInterface = new UserRepository();
+const postRepository = new PostRepository();
+const commentRepository = new PostCommentRepository();
+const followRepository = new FollowRepository();
 dotenv.config();
 const CLIENT_URL = process.env.CLIENT_URL as string;
 
 const LOCKOUT_THRESHOLD = 5;
 const LOCKOUT_MS = 15 * 60 * 1000;
 const OTP_TTL_MS = 10 * 60 * 1000;
+const OTP_ATTEMPT_LIMIT = 5;
 const PASSWORD_EXPIRY_MS = 90 * 24 * 60 * 60 * 1000;
 const PASSWORD_HISTORY_LIMIT = 5;
 
 function jwtSecret() {
-  return process.env.JWT_SECRET || process.env.JWT_SECRET_TOKEN!;
+  return requireJwtSecret();
 }
 
 function hashOtp(otp: string) {
-  return crypto.createHash("sha256").update(otp).digest("hex");
+  return crypto.createHmac("sha256", requireOtpSecret()).update(otp).digest("hex");
 }
 
 function createNumericOtp() {
@@ -54,11 +62,15 @@ export class UserService {
       password,
       __v,
       otpSecret,
+      pendingOtpSecret,
       passwordHistory,
       emailVerificationCode,
       emailVerificationExpires,
+      emailVerificationAttempts,
       resetPasswordCode,
       resetPasswordExpires,
+      resetPasswordAttempts,
+      mfaFailedAttempts,
       ...safeUser
     } = userObj;
     return safeUser;
@@ -69,6 +81,7 @@ export class UserService {
     await userRepository.updateUser(user._id.toString(), {
       emailVerificationCode: hashOtp(otp),
       emailVerificationExpires: new Date(Date.now() + OTP_TTL_MS),
+      emailVerificationAttempts: 0,
     });
 
     // Email OTP verifies account ownership before protected access, reducing fake-account and mailbox takeover risk.
@@ -102,6 +115,14 @@ export class UserService {
     }
   }
 
+  private async assertCurrentPassword(user: IUser, currentPassword: string) {
+    const valid = await bcrypt.compare(currentPassword, user.password);
+    if (!valid) {
+      // Step-up auth defense: sensitive account changes require fresh proof of the user's password.
+      throw new HttpError(401, "Current password is incorrect");
+    }
+  }
+
   private async applyNewPassword(user: IUser, newPassword: string) {
     await this.ensurePasswordNotReused(user, newPassword);
     const hashedPassword = await bcrypt.hash(newPassword, 10);
@@ -116,6 +137,7 @@ export class UserService {
       lockUntil: null,
       resetPasswordCode: undefined,
       resetPasswordExpires: undefined,
+      resetPasswordAttempts: 0,
     });
   }
 
@@ -126,7 +148,7 @@ export class UserService {
     );
 
     if (existingUser) {
-      throw new Error("User with this email or username already exists");
+      throw new HttpError(409, "User with this email or username already exists");
     }
 
     // Passwords are bcrypt-hashed before storage so a database leak does not expose plaintext credentials.
@@ -150,7 +172,7 @@ export class UserService {
     const user = await userRepository.getUserByEmailWithSecrets(email);
 
     if (!user) {
-      throw new Error("Invalid credentials");
+      throw new HttpError(401, "Invalid credentials");
     }
 
     if (user.lockUntil && user.lockUntil.getTime() > Date.now()) {
@@ -163,7 +185,7 @@ export class UserService {
     if (!isPasswordValid) {
       await this.recordFailedLogin(user);
       await auditActivity({ userId: user._id.toString(), action: "user.login_failed", ...context });
-      throw new Error("Invalid credentials");
+      throw new HttpError(401, "Invalid credentials");
     }
 
     if (!user.isVerified) {
@@ -191,6 +213,35 @@ export class UserService {
     return { token, user: this.sanitizeUser(user), requiresOtp: false };
   }
 
+  async loginOAuthUser(userId: string, context?: { ip?: string; userAgent?: string }) {
+    const user = await userRepository.getUserWithSecrets(userId);
+    if (!user) throw new HttpError(401, "OAuth login failed");
+    if (user.lockUntil && user.lockUntil.getTime() > Date.now()) {
+      throw new HttpError(423, "Account temporarily locked. Try again later.");
+    }
+    if (!user.isVerified) {
+      throw new HttpError(403, "Please verify your email before logging in");
+    }
+    if (Date.now() - new Date(user.lastPasswordChange).getTime() > PASSWORD_EXPIRY_MS) {
+      throw new HttpError(403, "Password expired. Reset your password before logging in.");
+    }
+
+    await userRepository.updateUser(user._id.toString(), {
+      failedLoginAttempts: 0,
+      lockUntil: null,
+    });
+
+    if (user.otpEnabled) {
+      // OAuth must not bypass MFA; linked Google accounts get the same short-lived challenge as password logins.
+      const mfaToken = jwt.sign({ id: user._id.toString(), purpose: "mfa" }, jwtSecret(), { expiresIn: "5m" });
+      await auditActivity({ userId: user._id.toString(), action: "user.oauth_mfa_required", ...context });
+      return { requiresOtp: true, mfaToken, user: this.sanitizeUser(user) };
+    }
+
+    await auditActivity({ userId: user._id.toString(), action: "user.oauth_login_success", ...context });
+    return { token: this.createSessionToken(user), user: this.sanitizeUser(user), requiresOtp: false };
+  }
+
   createSessionToken(user: IUser) {
     return jwt.sign(
       {
@@ -213,6 +264,9 @@ export class UserService {
     if (!user || !user.otpSecret || !user.otpEnabled) {
       throw new HttpError(401, "MFA is not enabled");
     }
+    if (user.lockUntil && user.lockUntil.getTime() > Date.now()) {
+      throw new HttpError(423, "Account temporarily locked. Try again later.");
+    }
 
     const valid = speakeasy.totp.verify({
       secret: user.otpSecret,
@@ -222,50 +276,72 @@ export class UserService {
     });
 
     if (!valid) {
+      const nextAttempts = (user.mfaFailedAttempts || 0) + 1;
+      await userRepository.updateUser(user._id.toString(), {
+        mfaFailedAttempts: nextAttempts,
+        lockUntil: nextAttempts >= OTP_ATTEMPT_LIMIT ? new Date(Date.now() + LOCKOUT_MS) : user.lockUntil,
+      });
       await auditActivity({ userId: user._id.toString(), action: "user.mfa_failed", ...context });
-      throw new HttpError(401, "Invalid OTP");
+      throw new HttpError(401, nextAttempts >= OTP_ATTEMPT_LIMIT ? "Too many MFA attempts. Try again later." : "Invalid OTP");
     }
 
+    await userRepository.updateUser(user._id.toString(), { mfaFailedAttempts: 0, lockUntil: null });
     await auditActivity({ userId: user._id.toString(), action: "user.mfa_success", ...context });
     return { token: this.createSessionToken(user), user: this.sanitizeUser(user) };
   }
 
-  async setupMfa(userId: string) {
-    const user = await userRepository.getUserById(userId);
-    if (!user) throw new Error("User not found");
+  async setupMfa(userId: string, currentPassword: string) {
+    const user = await userRepository.getUserWithSecrets(userId);
+    if (!user) throw new HttpError(404, "User not found");
+    await this.assertCurrentPassword(user, currentPassword);
+    if (user.otpEnabled) throw new HttpError(400, "MFA is already enabled");
 
     const secret = speakeasy.generateSecret({
       name: `Quill (${user.email})`,
       issuer: "Quill",
     });
 
-    await userRepository.updateUser(userId, { otpSecret: secret.base32 });
+    await userRepository.updateUser(userId, { pendingOtpSecret: secret.base32, mfaFailedAttempts: 0 });
     const qrCodeDataUrl = await qrcode.toDataURL(secret.otpauth_url || "");
 
-    // The TOTP secret is stored server-side and returned only as a QR setup image during enrollment.
+    // The pending TOTP secret is not activated until confirmMfa proves the user has enrolled it.
     return { qrCodeDataUrl, manualEntryKey: secret.base32 };
   }
 
   async confirmMfa(userId: string, otp: string, context?: { ip?: string; userAgent?: string }) {
     const user = await userRepository.getUserWithSecrets(userId);
-    if (!user || !user.otpSecret) throw new HttpError(400, "Start MFA setup first");
+    if (!user || !user.pendingOtpSecret) throw new HttpError(400, "Start MFA setup first");
 
     const valid = speakeasy.totp.verify({
-      secret: user.otpSecret,
+      secret: user.pendingOtpSecret,
       encoding: "base32",
       token: otp,
       window: 1,
     });
 
-    if (!valid) throw new HttpError(400, "Invalid OTP");
-    const updated = await userRepository.updateUser(userId, { otpEnabled: true });
+    if (!valid) {
+      const nextAttempts = (user.mfaFailedAttempts || 0) + 1;
+      await userRepository.updateUser(userId, {
+        mfaFailedAttempts: nextAttempts,
+        pendingOtpSecret: nextAttempts >= OTP_ATTEMPT_LIMIT ? undefined : user.pendingOtpSecret,
+      });
+      throw new HttpError(400, nextAttempts >= OTP_ATTEMPT_LIMIT ? "Too many MFA attempts. Start setup again." : "Invalid OTP");
+    }
+    const updated = await userRepository.updateUser(userId, {
+      otpSecret: user.pendingOtpSecret,
+      pendingOtpSecret: undefined,
+      otpEnabled: true,
+      mfaFailedAttempts: 0,
+      sessionVersion: (user.sessionVersion || 0) + 1,
+    });
     await auditActivity({ userId, action: "user.mfa_enabled", ...context });
     return updated ? this.sanitizeUser(updated) : null;
   }
 
-  async disableMfa(userId: string, otp: string, context?: { ip?: string; userAgent?: string }) {
+  async disableMfa(userId: string, otp: string, currentPassword: string, context?: { ip?: string; userAgent?: string }) {
     const user = await userRepository.getUserWithSecrets(userId);
     if (!user || !user.otpSecret || !user.otpEnabled) throw new HttpError(400, "MFA is not enabled");
+    await this.assertCurrentPassword(user, currentPassword);
 
     const valid = speakeasy.totp.verify({
       secret: user.otpSecret,
@@ -274,8 +350,18 @@ export class UserService {
       window: 1,
     });
 
-    if (!valid) throw new HttpError(400, "Invalid OTP");
-    const updated = await userRepository.updateUser(userId, { otpEnabled: false, otpSecret: undefined });
+    if (!valid) {
+      const nextAttempts = (user.mfaFailedAttempts || 0) + 1;
+      await userRepository.updateUser(userId, { mfaFailedAttempts: nextAttempts });
+      throw new HttpError(400, nextAttempts >= OTP_ATTEMPT_LIMIT ? "Too many MFA attempts. Try again later." : "Invalid OTP");
+    }
+    const updated = await userRepository.updateUser(userId, {
+      otpEnabled: false,
+      otpSecret: undefined,
+      pendingOtpSecret: undefined,
+      mfaFailedAttempts: 0,
+      sessionVersion: (user.sessionVersion || 0) + 1,
+    });
     await auditActivity({ userId, action: "user.mfa_disabled", ...context });
     return updated ? this.sanitizeUser(updated) : null;
   }
@@ -283,12 +369,26 @@ export class UserService {
   async verifyEmail(email: string, otp: string, context?: { ip?: string; userAgent?: string }) {
     const user = await userRepository.getUserByEmailWithSecrets(email);
     if (!user) throw new HttpError(400, "Invalid or expired OTP");
+    if ((user.emailVerificationAttempts || 0) >= OTP_ATTEMPT_LIMIT) {
+      throw new HttpError(429, "Too many verification attempts. Request a new OTP.");
+    }
 
-    assertOtp(user.emailVerificationCode, user.emailVerificationExpires, otp);
+    try {
+      assertOtp(user.emailVerificationCode, user.emailVerificationExpires, otp);
+    } catch (error) {
+      const nextAttempts = (user.emailVerificationAttempts || 0) + 1;
+      await userRepository.updateUser(user._id.toString(), {
+        emailVerificationAttempts: nextAttempts,
+        emailVerificationCode: nextAttempts >= OTP_ATTEMPT_LIMIT ? undefined : user.emailVerificationCode,
+        emailVerificationExpires: nextAttempts >= OTP_ATTEMPT_LIMIT ? undefined : user.emailVerificationExpires,
+      });
+      throw error;
+    }
     const updated = await userRepository.updateUser(user._id.toString(), {
       isVerified: true,
       emailVerificationCode: undefined,
       emailVerificationExpires: undefined,
+      emailVerificationAttempts: 0,
     });
     await auditActivity({ userId: user._id.toString(), action: "user.email_verified", ...context });
     return updated ? this.sanitizeUser(updated) : null;
@@ -304,34 +404,97 @@ export class UserService {
     return this.sanitizeUser(user);
   }
 
-  async updateUser(userId: string, data: EditUserDTO, context?: { ip?: string; userAgent?: string }) {
-    const user = await userRepository.getUserById(userId);
-    if (!user) throw new Error("User not found");
+  async updateUser(userId: string, data: ProfileEditDTO, context?: { ip?: string; userAgent?: string }) {
+    const user = await userRepository.getUserWithSecrets(userId);
+    if (!user) throw new HttpError(404, "User not found");
 
     // Mass assignment protection: profile edits may not set role, password, verification, or MFA fields.
-    const { role, ...safeData } = data;
+    const { role, currentPassword, ...safeData } = data;
+    const nextEmail = safeData.email?.toLowerCase();
+    const emailChanged = Boolean(nextEmail && nextEmail !== user.email);
 
     if (safeData.email || safeData.username) {
       const existingUser = await userRepository.findByEmailOrUsername(
-        safeData.email ?? "",
+        nextEmail ?? "",
         safeData.username ?? "",
       );
 
       if (existingUser && existingUser._id.toString() !== userId) {
-        throw new Error("Email or username already in use");
+        throw new HttpError(409, "Email or username already in use");
       }
     }
 
-    const updatedUser = await userRepository.updateUser(userId, safeData);
-    if (!updatedUser) throw new Error("Failed to update user");
+    if (emailChanged) {
+      if (!currentPassword) throw new HttpError(400, "Current password is required to change email");
+      await this.assertCurrentPassword(user, currentPassword);
+    }
+
+    const updatedUser = await userRepository.updateUser(userId, {
+      ...safeData,
+      email: nextEmail ?? safeData.email,
+      ...(emailChanged
+        ? {
+            isVerified: false,
+            sessionVersion: (user.sessionVersion || 0) + 1,
+          }
+        : {}),
+    });
+    if (!updatedUser) throw new HttpError(500, "Failed to update user");
+
+    if (emailChanged) {
+      await this.sendVerificationEmail(updatedUser);
+      await auditActivity({ userId, action: "user.email_change_requested", ...context });
+    }
 
     await auditActivity({ userId, action: "user.profile_updated", ...context });
     return this.sanitizeUser(updatedUser);
   }
 
+  async updateUserAsAdmin(userId: string, data: EditUserDTO, context?: { ip?: string; userAgent?: string; actorId?: string }) {
+    const user = await userRepository.getUserById(userId);
+    if (!user) throw new HttpError(404, "User not found");
+
+    const { role, ...safeData } = data;
+    const nextEmail = safeData.email?.toLowerCase();
+    const emailChanged = Boolean(nextEmail && nextEmail !== user.email);
+
+    if (safeData.email || safeData.username) {
+      const existingUser = await userRepository.findByEmailOrUsername(
+        nextEmail ?? "",
+        safeData.username ?? "",
+      );
+
+      if (existingUser && existingUser._id.toString() !== userId) {
+        throw new HttpError(409, "Email or username already in use");
+      }
+    }
+
+    const updatedUser = await userRepository.updateUser(userId, {
+      ...safeData,
+      email: nextEmail ?? safeData.email,
+      ...(emailChanged
+        ? {
+            isVerified: false,
+            sessionVersion: (user.sessionVersion || 0) + 1,
+          }
+        : {}),
+    });
+    if (!updatedUser) throw new HttpError(500, "Failed to update user");
+
+    if (emailChanged) await this.sendVerificationEmail(updatedUser);
+    await auditActivity({
+      userId: context?.actorId,
+      action: "admin.user_updated",
+      metadata: { targetUserId: userId },
+      ip: context?.ip,
+      userAgent: context?.userAgent,
+    });
+    return this.sanitizeUser(updatedUser);
+  }
+
   async changePassword(userId: string, data: ChangePasswordDTO, context?: { ip?: string; userAgent?: string }) {
     const user = await userRepository.getUserWithSecrets(userId);
-    if (!user) throw new Error("User not found");
+    if (!user) throw new HttpError(404, "User not found");
 
     const valid = await bcrypt.compare(data.currentPassword, user.password);
     if (!valid) throw new HttpError(401, "Current password is incorrect");
@@ -349,26 +512,35 @@ export class UserService {
 
   async getUserById(userId: string) {
     const user = await userRepository.getUserById(userId);
-    if (!user) throw new Error("User not found");
+    if (!user) throw new HttpError(404, "User not found");
     return this.sanitizeUser(user);
   }
 
   async getPublicUserById(userId: string) {
     const user = await userRepository.getPublicUserById(userId);
-    if (!user) throw new Error("User not found");
+    if (!user) throw new HttpError(404, "User not found");
     return this.sanitizeUser(user);
   }
 
   async getUserByUsername(username: string) {
     const user = await userRepository.getUserByUsername(username);
-    if (!user) throw new Error("User not found");
+    if (!user) throw new HttpError(404, "User not found");
     return this.sanitizeUser(user);
   }
 
   async deleteUser(userId: string, context?: { ip?: string; userAgent?: string }) {
     const user = await userRepository.getUserById(userId);
-    if (!user) throw new Error("User not found");
+    if (!user) throw new HttpError(404, "User not found");
 
+    const authoredPostIds = await postRepository.getPostIdsByUser(userId);
+    const commentCounts = await commentRepository.getCommentCountsByUser(userId);
+    await commentRepository.deleteCommentsByUser(userId);
+    await commentRepository.deleteCommentsByPostIds(authoredPostIds);
+    await commentRepository.removeLikesByUser(userId);
+    await postRepository.deletePostsByUser(userId);
+    await postRepository.removeLikesByUser(userId);
+    await postRepository.decreaseCommentCounts(userId, commentCounts);
+    await followRepository.deleteFollowsForUser(userId);
     await userRepository.deleteUser(userId);
     await auditActivity({ userId, action: "user.deleted", ...context });
     return { message: "User deleted successfully" };
@@ -396,6 +568,7 @@ export class UserService {
     await userRepository.updateUser(user._id.toString(), {
       resetPasswordCode: hashOtp(otp),
       resetPasswordExpires: new Date(Date.now() + OTP_TTL_MS),
+      resetPasswordAttempts: 0,
     });
 
     const html = `<p>Your Quill password reset OTP is <strong>${otp}</strong>. It expires in 10 minutes.</p><p>Open ${CLIENT_URL}/reset-password to use it.</p>`;
@@ -409,10 +582,28 @@ export class UserService {
       throw new HttpError(400, "Email, OTP, and new password are required");
     }
 
+    const passwordCheck = PasswordPolicySchema.safeParse(newPassword);
+    if (!passwordCheck.success) {
+      throw new HttpError(400, passwordCheck.error.issues[0]?.message || "Password does not meet policy");
+    }
+
     const user = await userRepository.getUserByEmailWithSecrets(email.toLowerCase());
     if (!user) throw new HttpError(400, "Invalid or expired OTP");
+    if ((user.resetPasswordAttempts || 0) >= OTP_ATTEMPT_LIMIT) {
+      throw new HttpError(429, "Too many reset attempts. Request a new OTP.");
+    }
 
-    assertOtp(user.resetPasswordCode, user.resetPasswordExpires, otp);
+    try {
+      assertOtp(user.resetPasswordCode, user.resetPasswordExpires, otp);
+    } catch (error) {
+      const nextAttempts = (user.resetPasswordAttempts || 0) + 1;
+      await userRepository.updateUser(user._id.toString(), {
+        resetPasswordAttempts: nextAttempts,
+        resetPasswordCode: nextAttempts >= OTP_ATTEMPT_LIMIT ? undefined : user.resetPasswordCode,
+        resetPasswordExpires: nextAttempts >= OTP_ATTEMPT_LIMIT ? undefined : user.resetPasswordExpires,
+      });
+      throw error;
+    }
     await this.applyNewPassword(user, newPassword);
     await auditActivity({ userId: user._id.toString(), action: "user.password_reset_completed", ...context });
     return user;
@@ -420,7 +611,7 @@ export class UserService {
 
   async exportMyData(userId: string, context?: { ip?: string; userAgent?: string }) {
     const user = await userRepository.getUserById(userId);
-    if (!user) throw new Error("User not found");
+    if (!user) throw new HttpError(404, "User not found");
 
     await auditActivity({ userId, action: "user.data_exported", ...context });
     // Privacy export intentionally excludes password hashes, OTP secrets, and one-time codes.
@@ -436,7 +627,7 @@ export class UserService {
       bio: data.bio,
       avatarUrl: data.avatarUrl,
     });
-    if (!updated) throw new Error("User not found");
+    if (!updated) throw new HttpError(404, "User not found");
 
     await auditActivity({ userId, action: "user.data_imported", ...context });
     return this.sanitizeUser(updated);
