@@ -409,7 +409,7 @@ export class UserService {
     if (!user) throw new HttpError(404, "User not found");
 
     // Mass assignment protection: profile edits may not set role, password, verification, or MFA fields.
-    const { role, currentPassword, ...safeData } = data;
+    const { currentPassword, ...safeData } = data;
     const nextEmail = safeData.email?.toLowerCase();
     const emailChanged = Boolean(nextEmail && nextEmail !== user.email);
 
@@ -431,7 +431,10 @@ export class UserService {
 
     const updatedUser = await userRepository.updateUser(userId, {
       ...safeData,
-      email: nextEmail ?? safeData.email,
+      // Omit email entirely when the profile form did not submit it. The
+      // repository deliberately treats an explicit undefined as $unset for
+      // secret cleanup, and unsetting this required field caused the 500.
+      ...(nextEmail ? { email: nextEmail } : {}),
       ...(emailChanged
         ? {
             isVerified: false,
@@ -471,7 +474,8 @@ export class UserService {
 
     const updatedUser = await userRepository.updateUser(userId, {
       ...safeData,
-      email: nextEmail ?? safeData.email,
+      // Do not turn an omitted email into an explicit undefined/$unset update.
+      ...(nextEmail ? { email: nextEmail } : {}),
       ...(emailChanged
         ? {
             isVerified: false,
@@ -572,7 +576,16 @@ export class UserService {
     });
 
     const html = `<p>Your Quill password reset OTP is <strong>${otp}</strong>. It expires in 10 minutes.</p><p>Open ${CLIENT_URL}/reset-password to use it.</p>`;
-    await sendEmail(user.email, "Password Reset", html);
+    try {
+      await sendEmail(user.email, "Password Reset", html);
+    } catch (error) {
+      // Keep SMTP details out of the API response, but retain an actionable server-side diagnostic without logging the OTP.
+      logger.error("Password reset email delivery failed", {
+        userId: user._id.toString(),
+        error: error instanceof Error ? error.message : "Unknown mail transport error",
+      });
+      throw error;
+    }
     await auditActivity({ userId: user._id.toString(), action: "user.password_reset_requested", ...context });
     return user;
   }

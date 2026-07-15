@@ -5,8 +5,13 @@ import passport from "passport";
 import { Strategy as GoogleStrategy, Profile } from "passport-google-oauth20";
 import { UserModel } from "../model/user.model";
 import { cleanOAuthDisplayName } from "../../../utils/xss";
-import { clearStrictCookieOptions, strictCookieOptions } from "../../../utils/security";
+import {
+  clearOAuthStateCookieOptions,
+  oauthStateCookieOptions,
+  strictCookieOptions,
+} from "../../../utils/security";
 import { UserService } from "../service/user.service";
+import logger from "../../../utils/logger";
 
 const authRouter = Router();
 const userService = new UserService();
@@ -81,7 +86,7 @@ authRouter.get("/google", (req, res, next) => {
   }
 
   const state = crypto.randomBytes(32).toString("hex");
-  res.cookie("oauth-state", state, strictCookieOptions(5 * 60 * 1000, true)); // OAuth CSRF defense: callback must echo this server-issued state.
+  res.cookie("oauth-state", state, oauthStateCookieOptions(5 * 60 * 1000)); // OAuth CSRF defense: callback must echo this server-issued state.
 
   return passport.authenticate("google", {
     scope: ["profile", "email"],
@@ -99,7 +104,10 @@ authRouter.get("/google/callback", (req, res, next) => {
 
   passport.authenticate("google", { session: false }, async (error: Error | null, user?: GoogleUser) => {
     if (error || !user) {
-      res.clearCookie("oauth-state", clearStrictCookieOptions());
+      logger.error("Google OAuth callback authentication failed", {
+        error: error?.message || "Google did not return an authenticated user",
+      });
+      res.clearCookie("oauth-state", clearOAuthStateCookieOptions());
       return res.redirect(`${process.env.CLIENT_URL || "https://localhost:3000"}/login?oauth=failed`);
     }
 
@@ -109,7 +117,7 @@ authRouter.get("/google/callback", (req, res, next) => {
         userAgent: req.get("user-agent"),
       });
 
-      res.clearCookie("oauth-state", clearStrictCookieOptions());
+      res.clearCookie("oauth-state", clearOAuthStateCookieOptions());
       if (loginResult.requiresOtp && loginResult.mfaToken) {
         res.cookie("mfa-token", loginResult.mfaToken, strictCookieOptions(5 * 60 * 1000));
         return res.redirect(`${process.env.CLIENT_URL || "https://localhost:3000"}/verify-login-otp`);
@@ -117,8 +125,12 @@ authRouter.get("/google/callback", (req, res, next) => {
 
       res.cookie("token", loginResult.token, strictCookieOptions(7 * 24 * 60 * 60 * 1000)); // Same secure JWT cookie settings as password login.
       return res.redirect(`${process.env.CLIENT_URL || "https://localhost:3000"}/feed`);
-    } catch {
-      res.clearCookie("oauth-state", clearStrictCookieOptions());
+    } catch (error) {
+      logger.error("Google OAuth application login failed", {
+        userId: String(user._id),
+        error: error instanceof Error ? error.message : "Unknown OAuth login error",
+      });
+      res.clearCookie("oauth-state", clearOAuthStateCookieOptions());
       return res.redirect(`${process.env.CLIENT_URL || "https://localhost:3000"}/login?oauth=failed`);
     }
   })(req, res, next);

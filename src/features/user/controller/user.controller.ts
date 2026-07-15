@@ -15,6 +15,7 @@ import { UserService } from "../service/user.service";
 import { verifyRecaptchaToken } from "../service/captcha.service";
 import { sendSafeError } from "../../../utils/api-response";
 import { clearStrictCookieOptions, strictCookieOptions } from "../../../utils/security";
+import logger from "../../../utils/logger";
 
 const userService = new UserService();
 
@@ -215,6 +216,13 @@ export class UserController {
         user: updatedUser,
       });
     } catch (error: any) {
+      // Keep internal database/upload details out of the response while making
+      // the server-side cause of profile failures available to operators.
+      logger.error("Profile update failed", {
+        userId: (req as any).user?.id,
+        hasAvatar: Boolean(req.file),
+        error: error instanceof Error ? error.message : "Unknown profile update error",
+      });
       return sendSafeError(res, error, "Something went wrong");
     }
   };
@@ -350,6 +358,22 @@ export class UserController {
       });
     } catch (error: Error | any) {
       return sendSafeError(res, error, "Internal Server Error");
+    }
+  };
+
+  getUserProfileByUsername = async (req: Request, res: Response) => {
+    try {
+      const { username } = req.params;
+      if (typeof username !== "string" || !username) {
+        return res.status(404).json({ success: false, message: "User not found" });
+      }
+
+      // The service returns a sanitized public profile, never password hashes,
+      // OTP secrets, reset codes, or other authentication material.
+      const user = await userService.getUserByUsername(username);
+      return res.status(200).json({ success: true, user });
+    } catch (error: unknown) {
+      return sendSafeError(res, error, "User not found", 404);
     }
   };
 }
