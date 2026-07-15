@@ -67,6 +67,14 @@ app.get("/api/health", (_req, res) => {
   return res.status(200).json({ success: true, message: "OK" });
 });
 
+app.get("/api/public-config", (_req, res) => {
+  // The site key is intentionally public and is required by browsers to render
+  // reCAPTCHA. The private RECAPTCHA_SECRET_KEY is never returned here.
+  return res.status(200).json({
+    recaptchaSiteKey: process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY || "",
+  });
+});
+
 app.get("/api/csrf-token", (req, res) => {
   // Issues a non-httpOnly CSRF token cookie so the frontend can echo it in X-CSRF-Token.
   const token = generateCSRFToken(req, res);
