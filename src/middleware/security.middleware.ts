@@ -113,7 +113,10 @@ export const corsMiddleware = cors({
   ]), // Only configured frontend origins can make browser requests with cookies; supports local and VMware testing URLs.
   credentials: true, // Allows httpOnly auth cookies to be sent intentionally from the trusted frontend.
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH"], // Limits cross-origin verbs to API-supported methods.
-  allowedHeaders: ["Content-Type", "X-CSRF-Token"], // Requires CSRF tokens in a custom header browsers cannot add cross-site by form post.
+  // X-Confirm-Action is narrowly allowed so trusted-origin admin DELETE
+  // preflights can reach the route-level destructive-action confirmation check.
+  // CSRF and admin authorization are still independently required.
+  allowedHeaders: ["Content-Type", "X-CSRF-Token", "X-Confirm-Action"],
 });
 
 function parseIpList(value?: string) {
