@@ -43,7 +43,16 @@ export const EditUserDTO = UserSchema.pick({
 }).partial(); // doesnt ask user to insert all field when editing
 export type EditUserDTO = z.infer<typeof EditUserDTO>;
 
-export const ProfileEditDTO = EditUserDTO.extend({
+// Profile edits use an explicit allowlist. Building this from EditUserDTO would
+// also run the role field's default and inject role="user" into normal profile
+// requests even when the browser never submitted a role.
+export const ProfileEditDTO = UserSchema.pick({
+  fullName: true,
+  username: true,
+  email: true,
+  bio: true,
+  avatarUrl: true,
+}).partial().extend({
   // Email changes are account-takeover sensitive, so the backend requires fresh password proof when email is present.
   currentPassword: z.string().min(1, "Current password is required").optional(),
 });

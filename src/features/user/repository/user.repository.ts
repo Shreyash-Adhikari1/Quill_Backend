@@ -102,7 +102,7 @@ export class UserRepository implements UserRepositoryInterface {
         ...($set && Object.keys($set).length > 0 ? { $set } : {}),
         ...($unset && Object.keys($unset).length > 0 ? { $unset } : {}),
       },
-      { new: true, runValidators: true },
+      { returnDocument: "after", runValidators: true },
     ).exec();
   }
 
@@ -122,7 +122,7 @@ export class UserRepository implements UserRepositoryInterface {
         $inc: { postCount: 1 },
         $addToSet: { posts: post },
       },
-      { new: true },
+      { returnDocument: "after" },
     )
       .populate("posts", "media caption tags")
       .exec();
@@ -139,7 +139,7 @@ export class UserRepository implements UserRepositoryInterface {
         $inc: { postCount: -1 },
         $pull: { posts: post },
       },
-      { new: true },
+      { returnDocument: "after" },
     );
   }
 

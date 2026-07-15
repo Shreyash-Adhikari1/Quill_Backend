@@ -48,6 +48,12 @@ userRouter.delete("/me", authMiddleware, userController.deleteUser);
 // get routes
 userRouter.get("/users", authMiddleware, adminOnly, userController.getAllusers);
 
+// Ordinary authenticated users may retrieve one sanitized public profile by
+// username without receiving the admin-only complete user directory.
+// Keep this literal prefix before /:userId so Express cannot treat "username"
+// as a MongoDB user ID.
+userRouter.get("/username/:username", authMiddleware, userController.getUserProfileByUsername);
+
 userRouter.get("/:userId", authMiddleware, userController.getUserProfile);
 
 userRouter.post(

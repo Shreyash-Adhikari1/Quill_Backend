@@ -72,7 +72,7 @@ export class AdminRepository implements IAdminRepository {
       {
         $set: { posts: [], postCount: 0 },
       },
-      { new: true },
+      { returnDocument: "after" },
     );
     return deleted;
   }

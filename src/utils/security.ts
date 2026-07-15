@@ -36,3 +36,23 @@ export function clearStrictCookieOptions(httpOnly = true): CookieOptions {
     sameSite: "strict",
   };
 }
+
+export function oauthStateCookieOptions(maxAge: number): CookieOptions {
+  return {
+    httpOnly: true,
+    secure: secureCookieEnabled(),
+    // OAuth returns from google.com as a top-level cross-site navigation. Lax
+    // sends this CSRF state cookie on that callback while still excluding it
+    // from cross-site subrequests and form posts.
+    sameSite: "lax",
+    maxAge,
+  };
+}
+
+export function clearOAuthStateCookieOptions(): CookieOptions {
+  return {
+    httpOnly: true,
+    secure: secureCookieEnabled(),
+    sameSite: "lax",
+  };
+}
