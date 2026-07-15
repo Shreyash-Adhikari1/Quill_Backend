@@ -110,7 +110,7 @@ export class PostRepository implements PostRepositoryInterface {
     updatedData: Partial<IPost>,
   ): Promise<IPost | null> {
     return PostModel.findByIdAndUpdate(postId, updatedData, {
-      new: true,
+      returnDocument: "after",
     }).exec();
   }
 
@@ -154,7 +154,7 @@ export class PostRepository implements PostRepositoryInterface {
         likedBy: { $ne: userIdObj },
       },
       { $inc: { likeCount: 1 }, $addToSet: { likedBy: userIdObj } }, // ensures same user cannot be added twice },
-      { new: true },
+      { returnDocument: "after" },
     )
       .populate("author", "username fullName avatarUrl")
       .exec();
@@ -170,7 +170,7 @@ export class PostRepository implements PostRepositoryInterface {
         likedBy: userIdObj,
       },
       { $inc: { likeCount: -1 }, $pull: { likedBy: userIdObj } },
-      { new: true },
+      { returnDocument: "after" },
     )
       .populate("author", "username fullName avatarUrl")
       .exec();
@@ -189,7 +189,7 @@ export class PostRepository implements PostRepositoryInterface {
         $inc: { commentCount: 1 },
         $addToSet: { commentedBy: userObjId },
       },
-      { new: true },
+      { returnDocument: "after" },
     );
   }
 
@@ -204,7 +204,7 @@ export class PostRepository implements PostRepositoryInterface {
         $inc: { commentCount: -1 },
         $pull: { commentedBy: userObjId },
       },
-      { new: true },
+      { returnDocument: "after" },
     );
   }
 
@@ -212,7 +212,7 @@ export class PostRepository implements PostRepositoryInterface {
     return await PostModel.findByIdAndUpdate(
       postId,
       { $set: { isChallengeSubmission: true } },
-      { new: true },
+      { returnDocument: "after" },
     );
   }
 }

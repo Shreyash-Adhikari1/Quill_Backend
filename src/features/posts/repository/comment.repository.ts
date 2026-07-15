@@ -52,7 +52,7 @@ export class PostCommentRepository implements ICommentRepository {
         likedBy: { $ne: userIdObj },
       },
       { $inc: { likeCount: 1 }, $addToSet: { likedBy: userIdObj } },
-      { new: true },
+      { returnDocument: "after" },
     )
       .populate("userId", "username avatar")
       .exec();
@@ -72,7 +72,7 @@ export class PostCommentRepository implements ICommentRepository {
         likedBy: userIdObj,
       },
       { $inc: { likeCount: -1 }, $pull: { likedBy: userIdObj } },
-      { new: true },
+      { returnDocument: "after" },
     )
       .populate("userId", "username")
       .exec();
