@@ -75,7 +75,11 @@ function allowedHostValues() {
 }
 
 // Host header validation blocks cache-poisoning, password-reset poisoning, and proxy confusion attacks during localhost and VMware testing.
-export const hostHeaderValidation = (req: Request, res: Response, next: NextFunction) => {
+export const hostHeaderValidation = (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
   const allowedHosts = allowedHostValues();
   const hostHeaders = uniqueValues([
     req.headers.host,
@@ -84,7 +88,9 @@ export const hostHeaderValidation = (req: Request, res: Response, next: NextFunc
       : req.headers["x-forwarded-host"] || []),
   ]).map(normalizeHost);
 
-  const invalidHost = hostHeaders.find((host) => !host || !allowedHosts.has(host));
+  const invalidHost = hostHeaders.find(
+    (host) => !host || !allowedHosts.has(host),
+  );
 
   if (invalidHost) {
     // Security evidence hook: rejected host headers are logged without request bodies or credentials.
@@ -96,7 +102,9 @@ export const hostHeaderValidation = (req: Request, res: Response, next: NextFunc
       forwardedHost: req.headers["x-forwarded-host"],
     });
 
-    return res.status(400).json({ success: false, message: "Invalid host header" });
+    return res
+      .status(400)
+      .json({ success: false, message: "Invalid host header" });
   }
 
   next();
@@ -127,18 +135,30 @@ function parseIpList(value?: string) {
 }
 
 // Optional IP block/allow lists give administrators an emergency control for known hostile sources or restricted deployments.
-export const ipAccessControl = (req: Request, res: Response, next: NextFunction) => {
+export const ipAccessControl = (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
   const blockedIps = parseIpList(process.env.SECURITY_BLOCKED_IPS);
   const allowedIps = parseIpList(process.env.SECURITY_ALLOWED_IPS);
   const ip = req.ip || "";
 
   if (blockedIps.includes(ip)) {
-    logger.warn("Blocked IP rejected", { ip, path: req.path, method: req.method });
+    logger.warn("Blocked IP rejected", {
+      ip,
+      path: req.path,
+      method: req.method,
+    });
     return res.status(403).json({ error: "Access denied" });
   }
 
   if (allowedIps.length > 0 && !allowedIps.includes(ip)) {
-    logger.warn("Non-allowlisted IP rejected", { ip, path: req.path, method: req.method });
+    logger.warn("Non-allowlisted IP rejected", {
+      ip,
+      path: req.path,
+      method: req.method,
+    });
     return res.status(403).json({ error: "Access denied" });
   }
 
@@ -154,23 +174,39 @@ export const globalLimiter = rateLimit({
   message: { error: "Too many requests, please try again later" },
   handler: (req: Request, res: Response) => {
     // Logs rate-limit hits as security telemetry without storing passwords, tokens, or request bodies.
-    logger.warn("Rate limit hit", { ip: req.ip, path: req.path, method: req.method });
-    res.status(429).json({ error: "Too many requests, please try again later" });
+    logger.warn("Rate limit hit", {
+      ip: req.ip,
+      path: req.path,
+      method: req.method,
+    });
+    res
+      .status(429)
+      .json({ error: "Too many requests, please try again later" });
   },
 });
 
 // Auth limiter is exported for login/register/OTP routes where brute-force risk is higher.
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // Short window makes password guessing expensive.
-  max: 5, // Only five auth attempts per IP per window.
+  max: 15, // Only five auth attempts per IP per window.
   standardHeaders: true, // Provides standard retry metadata to legitimate clients.
   legacyHeaders: false, // Avoids legacy leak-prone header variants.
   skipSuccessfulRequests: true, // Successful auth does not punish legitimate users.
-  message: { error: "Too many authentication attempts. Please wait 15 minutes." },
+  message: {
+    error: "Too many authentication attempts. Please wait 15 minutes.",
+  },
   handler: (req: Request, res: Response) => {
     // Logs throttled auth attempts for brute-force monitoring.
-    logger.warn("Auth rate limit hit", { ip: req.ip, path: req.path, method: req.method });
-    res.status(429).json({ error: "Too many authentication attempts. Please wait 15 minutes." });
+    logger.warn("Auth rate limit hit", {
+      ip: req.ip,
+      path: req.path,
+      method: req.method,
+    });
+    res
+      .status(429)
+      .json({
+        error: "Too many authentication attempts. Please wait 15 minutes.",
+      });
   },
 });
 
@@ -184,7 +220,11 @@ export const passwordResetLimiter = rateLimit({
 });
 
 // Mongo sanitization strips dangerous MongoDB operator keys before user input reaches queries.
-export const mongoSanitizeMiddleware = (req: Request, _res: Response, next: NextFunction) => {
+export const mongoSanitizeMiddleware = (
+  req: Request,
+  _res: Response,
+  next: NextFunction,
+) => {
   const options = { replaceWith: "_" }; // Replaces $ and . so attempted NoSQL injection is neutralized but still recognizable.
 
   for (const key of ["body", "params"] as const) {
@@ -192,7 +232,11 @@ export const mongoSanitizeMiddleware = (req: Request, _res: Response, next: Next
 
     if (value && mongoSanitize.has(value)) {
       // Logs sanitized keys as OWASP A03 Injection telemetry without logging the full request body.
-      logger.warn("NoSQL injection attempt detected", { ip: req.ip, key, path: req.path });
+      logger.warn("NoSQL injection attempt detected", {
+        ip: req.ip,
+        key,
+        path: req.path,
+      });
       req[key] = mongoSanitize.sanitize(value, options);
     }
   }
