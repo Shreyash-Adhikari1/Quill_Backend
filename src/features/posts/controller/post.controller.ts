@@ -207,7 +207,11 @@ export class PostController {
           .json({ success: false, message: "Post not found" });
       }
       const like = await postService.likePost(postId as string, userId);
-      return res.status(201).json({ success: true, message: "Post Liked" });
+      if (like.message === "Post already upvoted") {
+        return res.status(409).json({ success: false, message: like.message });
+      }
+
+      return res.status(201).json({ success: true, message: like.message });
     } catch (error: any) {
       return sendSafeError(res, error, "Internal Server Error");
     }
@@ -229,7 +233,11 @@ export class PostController {
           .json({ success: false, message: "Post not found" });
       }
       const like = await postService.unlikePost(postId as string, userId);
-      return res.status(201).json({ success: true, message: "Post Unliked" });
+      if (like.message === "Post was not upvoted") {
+        return res.status(409).json({ success: false, message: like.message });
+      }
+
+      return res.status(201).json({ success: true, message: like.message });
     } catch (error: any) {
       return sendSafeError(res, error, "Internal Server Error");
     }
